@@ -22,6 +22,8 @@ type keysOptions struct {
 	Dim      int
 }
 
+// KeysOption configures KeysExist, GenerateKeys and OpenKeysFromFile.
+// Apply via the With* helpers below.
 type KeysOption func(*keysOptions)
 
 func WithKeyPath(p string) KeysOption      { return func(o *keysOptions) { o.Path = p } }
@@ -38,6 +40,11 @@ func buildKeysOptions(opts []KeysOption) keysOptions {
 	return o
 }
 
+// Keys is the local side of a 3-file FHE key bundle (EncKey / EvalKey /
+// SecKey). It wraps a shared CKKS context together with an Encryptor and
+// Decryptor derived from the bundle; EvalKey bytes are retained for
+// Client.RegisterKeys uploads. Keys have no server affinity until
+// Client.ActivateKeys is called.
 type Keys struct {
 	id           string
 	ckks         crypto.CKKSContext
@@ -48,6 +55,8 @@ type Keys struct {
 	activated    *Client
 }
 
+// ID returns the key identifier carried by the bundle. The server uses
+// this string in RegisterKeys / LoadKeys / UnloadKeys / DeleteKeys.
 func (k *Keys) ID() string { return k.id }
 
 func (k *Keys) Close() error {
@@ -67,6 +76,8 @@ func (k *Keys) Close() error {
 	return nil
 }
 
+// Encrypt runs the local FHE encrypt stage and returns one serialized
+// Query byte slice per input vector, ready for Index.Insert.
 func (k *Keys) Encrypt(vectors [][]float32) ([][]byte, error) {
 	if k == nil || k.closed {
 		return nil, ErrKeysClosed
@@ -74,6 +85,9 @@ func (k *Keys) Encrypt(vectors [][]float32) ([][]byte, error) {
 	return k.enc.EncryptMultiple(vectors, "item")
 }
 
+// Decrypt unpacks a CiphertextScore blob produced by Index.Score into
+// per-slot score vectors and their matching shard indices. The call is
+// local only; no Client is required.
 func (k *Keys) Decrypt(blob []byte) (scores [][]float64, shardIdx []int32, err error) {
 	if k == nil || k.closed {
 		return nil, nil, ErrKeysClosed
@@ -81,6 +95,8 @@ func (k *Keys) Decrypt(blob []byte) (scores [][]float64, shardIdx []int32, err e
 	return k.dec.DecryptScore(blob)
 }
 
+// KeysExist reports whether the 3-file bundle (EncKey.json, EvalKey.json,
+// SecKey.json) is present under WithKeyPath.
 func KeysExist(opts ...KeysOption) bool {
 	o := buildKeysOptions(opts)
 	if o.Path == "" {
@@ -94,6 +110,9 @@ func KeysExist(opts ...KeysOption) bool {
 	return true
 }
 
+// GenerateKeys writes a fresh 3-file bundle at WithKeyPath via the active
+// crypto provider. Returns ErrKeysAlreadyExist when any of the three
+// files is already present; GenerateKeys never overwrites existing keys.
 func GenerateKeys(opts ...KeysOption) error {
 	o := buildKeysOptions(opts)
 	if o.Path == "" {
@@ -117,6 +136,9 @@ func GenerateKeys(opts ...KeysOption) error {
 	return gen.Generate()
 }
 
+// OpenKeysFromFile loads the 3-file bundle at WithKeyPath and builds the
+// Encryptor + Decryptor pair backing a Keys handle. Returns ErrKeysNotFound
+// when the bundle is absent.
 func OpenKeysFromFile(opts ...KeysOption) (*Keys, error) {
 	o := buildKeysOptions(opts)
 	if o.Path == "" {

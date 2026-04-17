@@ -17,12 +17,18 @@ import (
 
 const Version = "0.0.0"
 
+// Client is a gRPC handle to an enVector server. Construct one with
+// NewClient and release with Close. Methods are safe for concurrent use.
 type Client struct {
 	conn *grpc.ClientConn
 	stub es2epb.ES2EServiceClient
 	opts clientOptions
 }
 
+// NewClient dials the enVector server described by the supplied options.
+// At minimum pass WithAddress; use WithInsecure for non-TLS endpoints
+// (local dev, bufconn tests). The connection is opened lazily — the first
+// RPC establishes the underlying channel.
 func NewClient(ctx context.Context, opts ...ClientOption) (*Client, error) {
 	_ = ctx
 	o := defaultClientOptions()

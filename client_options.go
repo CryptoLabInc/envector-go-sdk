@@ -28,6 +28,7 @@ func defaultClientOptions() clientOptions {
 	}
 }
 
+// ClientOption configures NewClient. Apply via the With* helpers below.
 type ClientOption func(*clientOptions)
 
 func WithAddress(addr string) ClientOption {

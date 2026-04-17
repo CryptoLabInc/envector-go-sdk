@@ -134,8 +134,15 @@ func (c *Client) DeleteKeys(ctx context.Context, keyID string) error {
 	return checkHeader("delete_key", resp.GetHeader())
 }
 
-// ActivateKeys makes keys resident: register if absent, unload every other
-// resident key (server allows only one at a time), then load the target.
+// ActivateKeys makes the given bundle the single resident key on the
+// server. It runs the 4-RPC auto-setup sequence required when only one
+// key may be loaded at a time: list existing keys, RegisterKeys if absent,
+// UnloadKeys on every other key, then LoadKeys on the target.
+//
+// A Keys handle may only be activated against one Client at a time.
+// Attempting to activate the same handle through a second Client returns
+// ErrKeysAlreadyActivated; re-activating against the original Client is
+// idempotent.
 func (c *Client) ActivateKeys(ctx context.Context, keys *Keys) error {
 	if c.conn == nil {
 		return ErrClientClosed

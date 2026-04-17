@@ -10,15 +10,23 @@ import (
 
 const insertChunkSize = 1 * 1024 * 1024
 
+// InsertRequest carries plaintext vectors and one parallel metadata string
+// per vector. Metadata is stored verbatim — the SDK never interprets it
+// (rune uses a JSON envelope; other callers may store anything).
 type InsertRequest struct {
 	Vectors  [][]float32
 	Metadata []string
 }
 
+// InsertResult reports the server-assigned item IDs in insertion order.
 type InsertResult struct {
 	ItemIDs []int64
 }
 
+// Insert FHE-encrypts the request vectors through the bound Keys and
+// streams the ciphertexts through BatchInsertData. Frames are split at
+// ~1 MiB of payload. Returns ErrKeysRequired when the Index was opened
+// without WithIndexKeys.
 func (i *Index) Insert(ctx context.Context, req InsertRequest) (*InsertResult, error) {
 	if i.client.conn == nil {
 		return nil, ErrClientClosed

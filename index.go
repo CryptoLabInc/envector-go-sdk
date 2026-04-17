@@ -19,6 +19,10 @@ type indexOptions struct {
 	Description     string
 }
 
+// IndexOption configures Client.Index. Apply via the With* helpers below.
+// WithIndexName is required; WithIndexKeys is required only for Insert;
+// encryption/type knobs default to the server's "cipher" index, "plain"
+// query, FLAT index type.
 type IndexOption func(*indexOptions)
 
 func WithIndexName(n string) IndexOption         { return func(o *indexOptions) { o.Name = n } }
@@ -32,6 +36,9 @@ func WithIndexQueryEncryption(s string) IndexOption {
 func WithIndexType(s string) IndexOption        { return func(o *indexOptions) { o.IndexType = s } }
 func WithIndexDescription(s string) IndexOption { return func(o *indexOptions) { o.Description = s } }
 
+// Index is a handle to a single server-side index, scoped to the Client
+// that opened it. Closing the Client invalidates the Index — there is no
+// separate Close on Index itself.
 type Index struct {
 	client *Client
 	name   string
@@ -39,16 +46,22 @@ type Index struct {
 	dim    int
 }
 
+// MetadataRef addresses a metadata row by (shard, row). Use the shard /
+// row pairs reported by Index.Score decryption to build a ref batch.
 type MetadataRef struct {
 	ShardIdx uint64
 	RowIdx   uint64
 }
 
+// Metadata is a metadata row returned by Index.GetMetadata. Data is an
+// opaque, server-provided string; its interpretation is the caller's
+// (rune, for example, wraps a JSON envelope).
 type Metadata struct {
 	ID   uint64
 	Data string
 }
 
+// Name returns the index name this handle is bound to.
 func (i *Index) Name() string { return i.name }
 
 func (c *Client) GetIndexList(ctx context.Context) ([]string, error) {
@@ -68,6 +81,9 @@ func (c *Client) GetIndexList(ctx context.Context) ([]string, error) {
 	return resp.GetIndexNames(), nil
 }
 
+// Index opens the named index, creating it from the remaining options if
+// the server does not yet have one. Repeat calls with the same
+// WithIndexName are idempotent and return equivalent handles.
 func (c *Client) Index(ctx context.Context, opts ...IndexOption) (*Index, error) {
 	if c.conn == nil {
 		return nil, ErrClientClosed
@@ -125,6 +141,8 @@ func (c *Client) createIndex(ctx context.Context, o indexOptions) error {
 	return checkHeader("create_index", resp.GetHeader())
 }
 
+// Drop deletes the server-side index. No prior unload is required; any
+// loaded state is released server-side as part of the call.
 func (i *Index) Drop(ctx context.Context) error {
 	if i.client.conn == nil {
 		return ErrClientClosed
@@ -140,6 +158,9 @@ func (i *Index) Drop(ctx context.Context) error {
 	return checkHeader("delete_index", resp.GetHeader())
 }
 
+// GetMetadata fetches metadata rows for the given refs. fields names the
+// metadata columns the server should include in the response; rune uses
+// []string{"metadata"}.
 func (i *Index) GetMetadata(ctx context.Context, refs []MetadataRef, fields []string) ([]Metadata, error) {
 	if i.client.conn == nil {
 		return nil, ErrClientClosed

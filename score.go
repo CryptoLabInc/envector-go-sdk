@@ -14,6 +14,10 @@ import (
 	es2epb "github.com/CryptoLabInc/envector-go-sdk/internal/transport/pb/es2e"
 )
 
+// Score runs InnerProduct with the given plaintext query vector. Each
+// returned byte slice is a marshalled CiphertextScore proto (grouped by
+// the server's response ID); pass it to Keys.Decrypt or an equivalent
+// vault to recover scores and shard indices.
 func (i *Index) Score(ctx context.Context, query []float32) ([][]byte, error) {
 	if i.client.conn == nil {
 		return nil, ErrClientClosed
