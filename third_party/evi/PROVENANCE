@@ -1,0 +1,44 @@
+third_party/evi/ — libevi_crypto redistribution (Pattern C)
+============================================================
+
+This tree ships prebuilt libevi_crypto libraries + C++ headers alongside the
+Go source so that `go get github.com/CryptoLabInc/envector-go-sdk` plus
+`-tags libevi` can build the capture path without any external C++ toolchain
+on the consumer side.
+
+Expected layout
+---------------
+  third_party/evi/
+    include/                      # C++ headers: deb/Encryptor.hpp, Context.hpp, Types.hpp, ...
+    darwin_arm64/lib/libevi_crypto.{a,dylib}
+    darwin_amd64/lib/libevi_crypto.{a,dylib}
+    linux_amd64/lib/libevi_crypto.{a,so}
+    linux_arm64/lib/libevi_crypto.{a,so}
+
+Source of truth
+---------------
+  Upstream repo : github.com/CryptoLabInc/evi-crypto   (public)
+  Pinned commit : TBD — fill in when first binary set is committed
+  Build command : scripts/refresh-evi.sh
+
+How to refresh
+--------------
+1. Clone or update CryptoLabInc/evi-crypto locally.
+2. Run `scripts/refresh-evi.sh <path-to-evi-crypto-checkout>` from the repo root.
+3. The script cmake-builds for each supported target and copies the resulting
+   libs + headers into this tree.
+4. Update the "Pinned commit" line above with the evi-crypto commit hash.
+5. Commit the changed binaries + this file in the same PR.
+
+Cross-compile escape hatch
+--------------------------
+Builds without `-tags libevi` use the pure-Go stubs in internal/crypto/ and
+do not require any file in this tree. That path is how CI cross-compiles for
+platforms we have not yet produced binaries for.
+
+License
+-------
+libevi_crypto is proprietary to CryptoLab Inc. Redistribution inside this
+public SDK repo is permitted because it is first-party code; do not mirror
+these binaries outside CryptoLab-owned distribution channels without a
+signed agreement. See pyenvector/__init__.py header for the full notice.

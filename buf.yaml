@@ -1,0 +1,28 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  # The schemas below are mirrored verbatim from pyenvector 1.2.2 so that the
+  # wire format (package, service, rpc, enum names) stays identical to the
+  # upstream server. We turn off the naming-style rules that would force us to
+  # drift from that format.
+  except:
+    - PACKAGE_VERSION_SUFFIX
+    - PACKAGE_DIRECTORY_MATCH
+    - PACKAGE_LOWER_SNAKE_CASE
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
+    - RPC_PASCAL_CASE
+    - SERVICE_SUFFIX
+    - ENUM_VALUE_PREFIX
+    - ENUM_VALUE_UPPER_SNAKE_CASE
+    - ENUM_ZERO_VALUE_SUFFIX
+    - FIELD_LOWER_SNAKE_CASE
+    - FILE_LOWER_SNAKE_CASE
+    - MESSAGE_PASCAL_CASE
+breaking:
+  use:
+    - FILE

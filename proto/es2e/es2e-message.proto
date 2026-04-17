@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package ES2E;
+
+import "es2/type.proto";
+import "es2/common-message.proto";
+
+option go_package = "github.com/CryptoLabInc/envector-go-sdk/internal/transport/pb/es2e;es2e";
+
+message GetIndexListRequest {
+  ES2.RequestHeader header = 1;
+  bool loaded_only = 2;
+}
+
+message GetIndexListResponse {
+  ES2.ResponseHeader header = 1;
+  repeated string index_names = 2;
+}
+
+message BatchInsertDataRequest {
+  ES2.RequestHeader header = 1;
+  string index_name = 2;
+  repeated ES2.PackedVectors packed_vectors = 3;
+}
+
+message BatchInsertDataResponse {
+  ES2.ResponseHeader header = 1;
+  repeated int64 item_ids = 2;
+}
+
+message InnerProductRequest {
+  ES2.RequestHeader header = 1;
+  string index_name = 2;
+  repeated ES2.DataType query_vector = 3;
+}
+
+message InnerProductResponse {
+  ES2.ResponseHeader header = 1;
+  repeated ES2.CiphertextScore ctxt_score = 2;
+}
+
+message GetMetadataRequest {
+  ES2.RequestHeader header = 1;
+  string index_name = 2;
+  repeated ES2.MetadataIdx idx = 3;
+  repeated string output_fields = 4;
+}
+
+message GetMetadataResponse {
+  ES2.ResponseHeader header = 1;
+  repeated ES2.Metadata metadata = 2;
+}
+
+message GetKeyListRequest {
+  ES2.RequestHeader header = 1;
+}
+
+message GetKeyListResponse {
+  ES2.ResponseHeader header = 1;
+  repeated string key_id = 2;
+}
+
+message CreateIndexRequest {
+  ES2.RequestHeader header = 1;
+  ES2.IndexInfo index_info = 2;
+}
+
+message CreateIndexResponse {
+  ES2.ResponseHeader header = 1;
+}
+
+message DeleteIndexRequest {
+  ES2.RequestHeader header = 1;
+  string index_name = 2;
+}
+
+message DeleteIndexResponse {
+  ES2.ResponseHeader header = 1;
+}
+
+message RegisterKeyRequest {
+  ES2.RequestHeader header = 1;
+  ES2.KeyInfo key_info = 2;
+  ES2.Key key = 3;
+}
+
+message RegisterKeyResponse {
+  ES2.ResponseHeader header = 1;
+}
+
+message LoadKeyRequest {
+  ES2.RequestHeader header = 1;
+  string key_id = 2;
+}
+
+message LoadKeyResponse {
+  ES2.ResponseHeader header = 1;
+}
+
+message UnloadKeyRequest {
+  ES2.RequestHeader header = 1;
+  string key_id = 2;
+}
+
+message UnloadKeyResponse {
+  ES2.ResponseHeader header = 1;
+}
+
+message DeleteKeyRequest {
+  ES2.RequestHeader header = 1;
+  string key_id = 2;
+}
+
+message DeleteKeyResponse {
+  ES2.ResponseHeader header = 1;
+}

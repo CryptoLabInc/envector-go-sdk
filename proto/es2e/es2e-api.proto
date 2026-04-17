@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package ES2E;
+
+import "es2e/es2e-message.proto";
+
+option go_package = "github.com/CryptoLabInc/envector-go-sdk/internal/transport/pb/es2e;es2e";
+
+service ES2EService {
+  rpc get_index_list    (ES2E.GetIndexListRequest)           returns (ES2E.GetIndexListResponse);
+  rpc get_metadata      (ES2E.GetMetadataRequest)            returns (ES2E.GetMetadataResponse);
+  rpc inner_product     (ES2E.InnerProductRequest)           returns (stream ES2E.InnerProductResponse);
+  rpc batch_insert_data (stream ES2E.BatchInsertDataRequest) returns (ES2E.BatchInsertDataResponse);
+
+  rpc create_index      (stream ES2E.CreateIndexRequest)     returns (ES2E.CreateIndexResponse);
+
+  rpc get_key_list      (ES2E.GetKeyListRequest)             returns (ES2E.GetKeyListResponse);
+  rpc register_key      (stream ES2E.RegisterKeyRequest)     returns (ES2E.RegisterKeyResponse);
+  rpc load_key          (ES2E.LoadKeyRequest)                returns (ES2E.LoadKeyResponse);
+  rpc unload_key        (ES2E.UnloadKeyRequest)              returns (ES2E.UnloadKeyResponse);
+
+  rpc delete_key        (ES2E.DeleteKeyRequest)              returns (ES2E.DeleteKeyResponse);
+  rpc delete_index      (ES2E.DeleteIndexRequest)            returns (ES2E.DeleteIndexResponse);
+}

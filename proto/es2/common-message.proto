@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package ES2;
+
+import "es2/type.proto";
+
+option go_package = "github.com/CryptoLabInc/envector-go-sdk/internal/transport/pb/es2;es2";
+
+message RequestHeader {
+  ES2.MessageType type = 1;
+  string id = 2;
+  uint64 timestamp = 3;
+}
+
+message ResponseHeader {
+  ES2.MessageType type = 1;
+  string id = 2;
+  uint64 timestamp = 3;
+  ES2.ReturnCode return_code = 4;
+  string error_message = 5;
+}

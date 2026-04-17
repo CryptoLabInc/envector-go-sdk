@@ -1,0 +1,118 @@
+syntax = "proto3";
+
+package ES2;
+
+option go_package = "github.com/CryptoLabInc/envector-go-sdk/internal/transport/pb/es2;es2";
+
+enum MessageType {
+  Unknown = 0;
+  InnerProduct = 101;
+  BatchInsertData = 111;
+  RegisterKey = 130;
+  CreateIndex = 220;
+  GetIndexList = 221;
+  DeleteIndex = 225;
+  GetKeyList = 230;
+  DeleteKey = 231;
+  LoadKey = 232;
+  UnloadKey = 233;
+  GetMetadata = 240;
+}
+
+enum IndexType {
+  HE_FLAT = 0;
+  FLAT = 2;
+}
+
+enum SearchType {
+  IPOnly = 0;
+}
+
+enum ReturnCode {
+  UnknownError = 0;
+  Success = 1;
+  Fail = 2;
+  NoSuchIndex = 3;
+  InvalidInput = 4;
+  NotFoundError = 5;
+  InvalidKeyURL = 6;
+  InvalidKeyAuthInfo = 7;
+  FailedToUnpackKey = 8;
+  InsufficientDIskSpace = 9;
+  Warning = 10;
+}
+
+message Vector {
+  string id = 1;
+  uint64 dim = 2;
+  uint64 level = 3;
+  repeated float data = 4;
+}
+
+message PackedCiphertexts {
+  string id = 1;
+  bytes data = 2;
+}
+
+message HEaaNCiphertext {
+  uint64 degree = 1;
+  bytes data = 2;
+}
+
+message DataType {
+  ES2.Vector plain_vector = 1;
+  ES2.PackedCiphertexts cipher_vector = 2;
+}
+
+message MetadataIdx {
+  uint64 shard_idx = 1;
+  uint64 row_idx = 2;
+}
+
+message PackedVectors {
+  ES2.DataType vector = 1;
+  repeated string metadata = 2;
+  uint64 num_vector = 3;
+}
+
+message CiphertextScore {
+  string id = 1;
+  repeated uint64 shard_idx = 2;
+  repeated ES2.HEaaNCiphertext ctxt_score = 3;
+}
+
+message Metadata {
+  uint64 id = 1;
+  string data = 2;
+}
+
+message Key {
+  uint64 size = 1;
+  bytes value = 2;
+}
+
+message KeyInfo {
+  string key_id = 1;
+  string type = 2;
+  string preset = 3;
+  string eval_mode = 4;
+  string sha256sum = 5;
+  bool is_loaded = 6;
+}
+
+// Field 11 (index_detail) is reserved for IVF configuration, unsupported here.
+message IndexInfo {
+  string index_name = 1;
+  uint64 dim = 2;
+  uint64 row_count = 3;
+  ES2.SearchType search_type = 4;
+  string key_id = 5;
+  string index_encryption = 6;
+  string query_encryption = 7;
+  string created_time = 8;
+  ES2.IndexType index_type = 9;
+  bool is_loaded = 10;
+  bool is_key_loaded = 12;
+  bool metadata_encryption = 13;
+  string description = 14;
+}
