@@ -114,9 +114,6 @@ func TestActivateKeys_NewKey_Register_Load_NoUnloads(t *testing.T) {
 	if !reflect.DeepEqual(fake.loadKeyCalls, []string{keys.id}) {
 		t.Errorf("loadKeyCalls = %v, want [%s]", fake.loadKeyCalls, keys.id)
 	}
-	if keys.activated != c {
-		t.Error("keys.activated not set to client")
-	}
 }
 
 func TestActivateKeys_SkipRegister_UnloadOthers(t *testing.T) {
@@ -142,7 +139,7 @@ func TestActivateKeys_SkipRegister_UnloadOthers(t *testing.T) {
 	}
 }
 
-func TestActivateKeys_AcrossClients_RejectsSecond(t *testing.T) {
+func TestActivateKeys_AcrossClients_AllowsBoth(t *testing.T) {
 	c1, _ := newFakeClient(t)
 	c2, _ := newFakeClient(t)
 	keys := openTestKeys(t)
@@ -150,9 +147,8 @@ func TestActivateKeys_AcrossClients_RejectsSecond(t *testing.T) {
 	if err := c1.ActivateKeys(context.Background(), keys); err != nil {
 		t.Fatalf("ActivateKeys c1: %v", err)
 	}
-	err := c2.ActivateKeys(context.Background(), keys)
-	if err == nil || err != ErrKeysAlreadyActivated {
-		t.Errorf("second activate: got %v, want ErrKeysAlreadyActivated", err)
+	if err := c2.ActivateKeys(context.Background(), keys); err != nil {
+		t.Errorf("ActivateKeys c2: same Keys against second Client must be allowed, got %v", err)
 	}
 }
 

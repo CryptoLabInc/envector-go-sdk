@@ -9,9 +9,9 @@ import (
 
 func TestIndex_Insert_RequiresKeys(t *testing.T) {
 	c, fake := newFakeClient(t)
-	fake.indexList = []string{"rune"}
+	fake.indexList = []string{"demo"}
 
-	idx, _ := c.Index(context.Background(), WithIndexName("rune"))
+	idx, _ := c.Index(context.Background(), WithIndexName("demo"))
 	_, err := idx.Insert(context.Background(), InsertRequest{Vectors: [][]float32{{1, 2}}})
 	if !errors.Is(err, ErrKeysRequired) {
 		t.Errorf("got %v, want ErrKeysRequired", err)
@@ -20,11 +20,11 @@ func TestIndex_Insert_RequiresKeys(t *testing.T) {
 
 func TestIndex_Insert_EmptyVectorsShortCircuit(t *testing.T) {
 	c, fake := newFakeClient(t)
-	fake.indexList = []string{"rune"}
+	fake.indexList = []string{"demo"}
 	keys := openTestKeys(t)
 
 	idx, _ := c.Index(context.Background(),
-		WithIndexName("rune"),
+		WithIndexName("demo"),
 		WithIndexKeys(keys),
 	)
 	res, err := idx.Insert(context.Background(), InsertRequest{})
@@ -41,16 +41,22 @@ func TestIndex_Insert_EmptyVectorsShortCircuit(t *testing.T) {
 
 func TestIndex_Insert_StreamsPackedVectorsAndPassesMetadata(t *testing.T) {
 	c, fake := newFakeClient(t)
-	fake.indexList = []string{"rune"}
+	fake.indexList = []string{"demo"}
 	fake.itemIDs = []int64{101, 102}
 	keys := openTestKeys(t)
 
 	idx, _ := c.Index(context.Background(),
-		WithIndexName("rune"),
+		WithIndexName("demo"),
 		WithIndexKeys(keys),
 	)
+	vec1 := make([]float32, 128)
+	vec2 := make([]float32, 128)
+	for i := range vec1 {
+		vec1[i] = float32(i)
+		vec2[i] = float32(2 * i)
+	}
 	req := InsertRequest{
-		Vectors:  [][]float32{{1, 2, 3, 4}, {5, 6, 7, 8}},
+		Vectors:  [][]float32{vec1, vec2},
 		Metadata: []string{`{"a":"x"}`, `{"a":"y"}`},
 	}
 	res, err := idx.Insert(context.Background(), req)
@@ -60,7 +66,7 @@ func TestIndex_Insert_StreamsPackedVectorsAndPassesMetadata(t *testing.T) {
 	if !reflect.DeepEqual(res.ItemIDs, []int64{101, 102}) {
 		t.Errorf("ItemIDs = %v", res.ItemIDs)
 	}
-	if fake.batchInsertIndex != "rune" {
+	if fake.batchInsertIndex != "demo" {
 		t.Errorf("IndexName = %q", fake.batchInsertIndex)
 	}
 
@@ -83,20 +89,23 @@ func TestIndex_Insert_StreamsPackedVectorsAndPassesMetadata(t *testing.T) {
 
 func TestIndex_Insert_ChunksAboveThreshold(t *testing.T) {
 	c, fake := newFakeClient(t)
-	fake.indexList = []string{"rune"}
+	fake.indexList = []string{"demo"}
 	keys := openTestKeys(t)
-	// Mock encrypt output is ~32 + 4*dim bytes per vector. To exceed the
-	// 1 MiB frame cutoff we fake many small vectors; mock provider keeps
-	// these deterministic.
-	n := 200
-	dim := 2000 // per-vector ~8032 bytes -> 200 vecs ~ 1.6 MiB total
+	// Real libevi ciphertexts at preset IP / dim 128 are several hundred KB
+	// each; 16 vectors comfortably crosses the 1 MiB frame cutoff and the
+	// stream must split into >=2 BatchInsertData frames.
+	n := 16
+	dim := 128
 	vecs := make([][]float32, n)
 	for i := range vecs {
 		vecs[i] = make([]float32, dim)
+		for j := range vecs[i] {
+			vecs[i][j] = float32(i*dim+j) / float32(n*dim)
+		}
 	}
 
 	idx, _ := c.Index(context.Background(),
-		WithIndexName("rune"),
+		WithIndexName("demo"),
 		WithIndexKeys(keys),
 	)
 	if _, err := idx.Insert(context.Background(), InsertRequest{Vectors: vecs}); err != nil {

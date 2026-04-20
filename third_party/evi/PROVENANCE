@@ -75,17 +75,28 @@ unresolved references in a single left-to-right pass:
 
   #cgo CPPFLAGS: -I${SRCDIR}/third_party/evi/include
   #cgo darwin  LDFLAGS: -L${SRCDIR}/third_party/evi/<goos>_<goarch>/lib \
-                        -levi_c_api -levi_crypto -ldeb -lalea -lc++ -lm
+                        -levi_c_api -levi_crypto -ldeb -lalea \
+                        -L/opt/homebrew/opt/openssl@3/lib \
+                        -L/usr/local/opt/openssl@3/lib \
+                        -lssl -lcrypto -lc++ -lm
   #cgo linux   LDFLAGS: -L${SRCDIR}/third_party/evi/<goos>_<goarch>/lib \
-                        -levi_c_api -levi_crypto -ldeb -lalea -lstdc++ -lm
+                        -levi_c_api -levi_crypto -ldeb -lalea \
+                        -lssl -lcrypto -lstdc++ -lm
   #cgo windows LDFLAGS: -L${SRCDIR}/third_party/evi/<goos>_<goarch>/lib \
-                        -levi_c_api -levi_crypto -ldeb -lalea -lstdc++ -lm
+                        -levi_c_api -levi_crypto -ldeb -lalea \
+                        -lssl -lcrypto -lstdc++ -lm
 
-darwin uses libc++ (Apple default), linux/MinGW use libstdc++. No
-`-lssl -lcrypto` needed on the NONE-seal path — libevi_crypto.a's
-OpenSSL-using members are not pulled in by the linker. If future SDK
-features add AES-KEK or key-management paths, append platform-appropriate
-OpenSSL link flags at that time.
+darwin uses libc++ (Apple default), linux/MinGW use libstdc++.
+
+OpenSSL is required even on the NONE-seal path. `evi_seal_info_create`
+(called by MultiKeyGenerator and Decryptor) transitively pulls
+`AES.cpp.o` + `Utils.cpp.o` into the link, and those `.o` members
+reference `BIO_*`, `EVP_*`, `RAND_*`. On macOS the Homebrew openssl@3
+prefix differs between Apple Silicon (/opt/homebrew) and Intel
+(/usr/local) — both search paths are supplied; the linker warns but
+continues for the non-existent one. Linux assumes system `libssl-dev`
+(Debian/Ubuntu) or `openssl-devel` (RHEL/Fedora). Windows assumes
+MSYS2 `mingw-w64-x86_64-openssl`.
 
 Source of truth
 ---------------

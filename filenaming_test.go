@@ -11,9 +11,6 @@ import (
 // in the base name, with two exceptions:
 //   - _test.go suffix (required by the Go test tooling)
 //   - generated code: *.pb.go
-//
-// Build-tag variant files should use distinct base names (e.g., cryptomock.go /
-// cryptocgo.go) rather than snake_case suffixes.
 func TestFileNamingConvention(t *testing.T) {
 	var offenders []string
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {

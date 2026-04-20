@@ -1,6 +1,5 @@
 // Package crypto is the internal FHE primitive boundary. Default() returns
-// a Provider chosen by build tag: the libevi tag swaps in the CGO binding,
-// otherwise a deterministic mock is used.
+// the cgo Provider that binds the bundled libevi static archives.
 package crypto
 
 type CKKSParams struct {
@@ -33,11 +32,16 @@ type KeyGenerator interface {
 	Generate() error
 }
 
+// Provider builds the four primitive handles that a Keys bundle needs.
+// Encryptor and Decryptor take the key directory path rather than the raw
+// key bytes because the upstream C API only exposes path-based loaders
+// (evi_keypack_create_from_path, evi_secret_key_create_from_path).
+// Providers read the individual key files off disk themselves.
 type Provider interface {
 	NewCKKSContext(CKKSParams) (CKKSContext, error)
-	NewEncryptor(CKKSContext, []byte) (Encryptor, error)
-	NewDecryptor(CKKSContext, []byte) (Decryptor, error)
+	NewEncryptor(ctx CKKSContext, keyDir string) (Encryptor, error)
+	NewDecryptor(ctx CKKSContext, keyDir string) (Decryptor, error)
 	NewKeyGenerator(KeyGenParams) (KeyGenerator, error)
 }
 
-func Default() Provider { return defaultProvider() }
+func Default() Provider { return cgoProvider{} }

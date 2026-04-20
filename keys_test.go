@@ -2,23 +2,20 @@ package envector
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"google.golang.org/protobuf/proto"
-
-	es2pb "github.com/CryptoLabInc/envector-go-sdk/internal/transport/pb/es2"
 )
 
 func baseKeyOpts(dir string) []KeysOption {
 	return []KeysOption{
 		WithKeyPath(dir),
 		WithKeyID("test-key"),
-		WithKeyPreset("FGb"),
-		WithKeyEvalMode("ip"),
-		WithKeyDim(4),
+		WithKeyPreset(PresetIP0),
+		WithKeyEvalMode(EvalModeRMP),
+		WithKeyDim(128),
 	}
 }
 
@@ -62,6 +59,28 @@ func TestGenerateKeys_RequiresPath(t *testing.T) {
 	}
 }
 
+func TestGenerateKeys_RequiresKeyID(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "keys")
+	if err := GenerateKeys(WithKeyPath(dir), WithKeyDim(4)); err == nil {
+		t.Error("expected error when WithKeyID absent")
+	}
+}
+
+func TestGenerateKeys_RequiresDim(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "keys")
+	if err := GenerateKeys(WithKeyPath(dir), WithKeyID("k")); err == nil {
+		t.Error("expected error when WithKeyDim absent (dim=0)")
+	}
+}
+
+func TestOpenKeysFromFile_RequiresKeyID(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "keys")
+	_ = GenerateKeys(baseKeyOpts(dir)...) // seed files so path check passes
+	if _, err := OpenKeysFromFile(WithKeyPath(dir), WithKeyDim(128)); err == nil {
+		t.Error("expected error when WithKeyID absent")
+	}
+}
+
 func TestOpenKeysFromFile_MissingReturnsErrKeysNotFound(t *testing.T) {
 	_, err := OpenKeysFromFile(baseKeyOpts(t.TempDir())...)
 	if !errors.Is(err, ErrKeysNotFound) {
@@ -88,7 +107,7 @@ func TestOpenKeysFromFile_HappyPath(t *testing.T) {
 	}
 }
 
-func TestKeys_EncryptDecryptRoundTrip(t *testing.T) {
+func TestKeys_EncryptProducesDistinctCiphertexts(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "keys")
 	_ = GenerateKeys(baseKeyOpts(dir)...)
 	keys, err := OpenKeysFromFile(baseKeyOpts(dir)...)
@@ -97,27 +116,28 @@ func TestKeys_EncryptDecryptRoundTrip(t *testing.T) {
 	}
 	defer keys.Close()
 
-	vecs := [][]float32{{1, 2, 3, 4}, {5, 6, 7, 8}}
-	ciphers, err := keys.Encrypt(vecs)
+	vec1 := make([]float32, 128)
+	vec2 := make([]float32, 128)
+	for i := range vec1 {
+		vec1[i] = float32(i) / 128
+		vec2[i] = float32(128-i) / 128
+	}
+	ciphers, err := keys.Encrypt([][]float32{vec1, vec2})
 	if err != nil {
 		t.Fatalf("Encrypt: %v", err)
 	}
 	if len(ciphers) != 2 {
 		t.Fatalf("got %d ciphers, want 2", len(ciphers))
 	}
+	if len(ciphers[0]) == 0 || len(ciphers[1]) == 0 {
+		t.Fatal("ciphertexts must be non-empty")
+	}
 	if bytes.Equal(ciphers[0], ciphers[1]) {
 		t.Error("distinct vectors must yield distinct ciphertexts")
 	}
-
-	// Mock decryptor mirrors ShardIdx into scores.
-	buf, _ := proto.Marshal(&es2pb.CiphertextScore{ShardIdx: []uint64{2, 5}})
-	scores, idx, err := keys.Decrypt(buf)
-	if err != nil {
-		t.Fatalf("Decrypt: %v", err)
-	}
-	if len(scores) != 2 || idx[1] != 5 {
-		t.Errorf("Decrypt shape wrong: scores=%v idx=%v", scores, idx)
-	}
+	// Decrypt round trip is exercised end-to-end against a real server in
+	// integration tests; the cgo decryptor only accepts evi_search_result
+	// payloads produced by the server, which the SDK cannot synthesise here.
 }
 
 func TestKeys_AfterClose(t *testing.T) {
@@ -126,14 +146,108 @@ func TestKeys_AfterClose(t *testing.T) {
 	keys, _ := OpenKeysFromFile(baseKeyOpts(dir)...)
 	_ = keys.Close()
 
-	if _, err := keys.Encrypt([][]float32{{1}}); !errors.Is(err, ErrKeysClosed) {
-		t.Errorf("Encrypt after Close: got %v, want ErrKeysClosed", err)
+	if _, err := keys.Encrypt([][]float32{{1}}); !errors.Is(err, ErrKeysNotForEncrypt) {
+		t.Errorf("Encrypt after Close: got %v, want ErrKeysNotForEncrypt", err)
 	}
-	if _, _, err := keys.Decrypt(nil); !errors.Is(err, ErrKeysClosed) {
-		t.Errorf("Decrypt after Close: got %v, want ErrKeysClosed", err)
+	if _, _, err := keys.Decrypt(nil); !errors.Is(err, ErrKeysNotForDecrypt) {
+		t.Errorf("Decrypt after Close: got %v, want ErrKeysNotForDecrypt", err)
 	}
 	// Second Close must not panic.
 	if err := keys.Close(); err != nil {
 		t.Errorf("second Close: %v", err)
+	}
+}
+
+func TestOpenKeysFromFile_PartsEnc_NoEvalNoSec(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "keys")
+	if err := GenerateKeys(baseKeyOpts(dir)...); err != nil {
+		t.Fatalf("GenerateKeys: %v", err)
+	}
+	keys, err := OpenKeysFromFile(append(baseKeyOpts(dir), WithKeyParts(KeyPartEnc))...)
+	if err != nil {
+		t.Fatalf("OpenKeysFromFile: %v", err)
+	}
+	defer keys.Close()
+
+	if keys.enc == nil {
+		t.Error("encryptor must be loaded for KeyPartEnc")
+	}
+	if keys.dec != nil {
+		t.Error("decryptor must not be loaded without KeyPartSec")
+	}
+	if keys.evalKeyBytes != nil {
+		t.Error("evalKeyBytes must not be loaded without KeyPartEval")
+	}
+
+	if _, _, err := keys.Decrypt(nil); !errors.Is(err, ErrKeysNotForDecrypt) {
+		t.Errorf("Decrypt without KeyPartSec: got %v, want ErrKeysNotForDecrypt", err)
+	}
+}
+
+func TestOpenKeysFromFile_PartsEncEval_ClientSide(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "keys")
+	if err := GenerateKeys(baseKeyOpts(dir)...); err != nil {
+		t.Fatalf("GenerateKeys: %v", err)
+	}
+	keys, err := OpenKeysFromFile(append(baseKeyOpts(dir), WithKeyParts(KeyPartEnc, KeyPartEval))...)
+	if err != nil {
+		t.Fatalf("OpenKeysFromFile: %v", err)
+	}
+	defer keys.Close()
+
+	if keys.enc == nil {
+		t.Error("encryptor must be loaded for KeyPartEnc")
+	}
+	if keys.dec != nil {
+		t.Error("decryptor must not be loaded without KeyPartSec")
+	}
+	if len(keys.evalKeyBytes) == 0 {
+		t.Error("evalKeyBytes must be loaded for KeyPartEval")
+	}
+}
+
+func TestOpenKeysFromFile_PartsSec_VaultSide(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "keys")
+	if err := GenerateKeys(baseKeyOpts(dir)...); err != nil {
+		t.Fatalf("GenerateKeys: %v", err)
+	}
+	keys, err := OpenKeysFromFile(append(baseKeyOpts(dir), WithKeyParts(KeyPartSec))...)
+	if err != nil {
+		t.Fatalf("OpenKeysFromFile: %v", err)
+	}
+	defer keys.Close()
+
+	if keys.dec == nil {
+		t.Error("decryptor must be loaded for KeyPartSec")
+	}
+	if keys.enc != nil {
+		t.Error("encryptor must not be loaded without KeyPartEnc")
+	}
+	if keys.evalKeyBytes != nil {
+		t.Error("evalKeyBytes must not be loaded without KeyPartEval")
+	}
+
+	if _, err := keys.Encrypt([][]float32{{1, 2}}); !errors.Is(err, ErrKeysNotForEncrypt) {
+		t.Errorf("Encrypt without KeyPartEnc: got %v, want ErrKeysNotForEncrypt", err)
+	}
+}
+
+func TestRegisterKeys_WithoutEvalPart_ReturnsErr(t *testing.T) {
+	c, _ := newFakeClient(t)
+	dir := filepath.Join(t.TempDir(), "keys")
+	if err := GenerateKeys(baseKeyOpts(dir)...); err != nil {
+		t.Fatalf("GenerateKeys: %v", err)
+	}
+	keys, err := OpenKeysFromFile(append(baseKeyOpts(dir), WithKeyParts(KeyPartSec))...)
+	if err != nil {
+		t.Fatalf("OpenKeysFromFile: %v", err)
+	}
+	defer keys.Close()
+
+	if err := c.RegisterKeys(context.Background(), keys); !errors.Is(err, ErrKeysNotForRegister) {
+		t.Errorf("RegisterKeys without KeyPartEval: got %v, want ErrKeysNotForRegister", err)
+	}
+	if err := c.ActivateKeys(context.Background(), keys); !errors.Is(err, ErrKeysNotForRegister) {
+		t.Errorf("ActivateKeys without KeyPartEval: got %v, want ErrKeysNotForRegister", err)
 	}
 }

@@ -12,8 +12,8 @@ import (
 
 func TestIndex_Score_MergesStreamByID(t *testing.T) {
 	c, fake := newFakeClient(t)
-	fake.indexList = []string{"rune"}
-	idx, _ := c.Index(context.Background(), WithIndexName("rune"))
+	fake.indexList = []string{"demo"}
+	idx, _ := c.Index(context.Background(), WithIndexName("demo"))
 
 	// Three server responses, two response IDs interleaved.
 	fake.ipResponses = []*es2epb.InnerProductResponse{
@@ -55,13 +55,13 @@ func TestIndex_Score_MergesStreamByID(t *testing.T) {
 
 func TestIndex_Score_QueryCarriesIndexName(t *testing.T) {
 	c, fake := newFakeClient(t)
-	fake.indexList = []string{"rune"}
-	idx, _ := c.Index(context.Background(), WithIndexName("rune"))
+	fake.indexList = []string{"demo"}
+	idx, _ := c.Index(context.Background(), WithIndexName("demo"))
 
 	if _, err := idx.Score(context.Background(), []float32{1, 2}); err != nil {
 		t.Fatalf("Score: %v", err)
 	}
-	if fake.innerProductReq.GetIndexName() != "rune" {
+	if fake.innerProductReq.GetIndexName() != "demo" {
 		t.Errorf("IndexName = %q", fake.innerProductReq.GetIndexName())
 	}
 	if len(fake.innerProductReq.GetQueryVector()) != 1 {

@@ -10,13 +10,13 @@ import (
 
 func TestGetIndexList_RoundTrip(t *testing.T) {
 	c, fake := newFakeClient(t)
-	fake.indexList = []string{"rune", "vault"}
+	fake.indexList = []string{"demo", "extra"}
 
 	got, err := c.GetIndexList(context.Background())
 	if err != nil {
 		t.Fatalf("GetIndexList: %v", err)
 	}
-	if !reflect.DeepEqual(got, []string{"rune", "vault"}) {
+	if !reflect.DeepEqual(got, []string{"demo", "extra"}) {
 		t.Errorf("got %v", got)
 	}
 }
@@ -30,13 +30,13 @@ func TestClient_Index_RequiresName(t *testing.T) {
 
 func TestClient_Index_IdempotentWhenExisting(t *testing.T) {
 	c, fake := newFakeClient(t)
-	fake.indexList = []string{"rune"}
+	fake.indexList = []string{"demo"}
 
-	idx, err := c.Index(context.Background(), WithIndexName("rune"))
+	idx, err := c.Index(context.Background(), WithIndexName("demo"))
 	if err != nil {
 		t.Fatalf("Index: %v", err)
 	}
-	if idx.Name() != "rune" {
+	if idx.Name() != "demo" {
 		t.Errorf("Name = %q", idx.Name())
 	}
 	if fake.createIndexInfo != nil {
@@ -49,11 +49,9 @@ func TestClient_Index_CreatesWhenMissing(t *testing.T) {
 	fake.indexList = nil
 
 	_, err := c.Index(context.Background(),
-		WithIndexName("vault"),
+		WithIndexName("sample"),
 		WithIndexKeys(openTestKeys(t)),
-		WithIndexDim(1024),
-		WithIndexType("FLAT"),
-		WithIndexDescription("vault shard"),
+		WithIndexDescription("sample index"),
 	)
 	if err != nil {
 		t.Fatalf("Index: %v", err)
@@ -62,11 +60,11 @@ func TestClient_Index_CreatesWhenMissing(t *testing.T) {
 	if info == nil {
 		t.Fatal("CreateIndex was not invoked")
 	}
-	if info.GetIndexName() != "vault" {
+	if info.GetIndexName() != "sample" {
 		t.Errorf("IndexName = %q", info.GetIndexName())
 	}
-	if info.GetDim() != 1024 {
-		t.Errorf("Dim = %d", info.GetDim())
+	if info.GetDim() != 128 {
+		t.Errorf("Dim = %d, want %d (sourced from Keys.Dim())", info.GetDim(), 128)
 	}
 	if info.GetIndexType() != es2pb.IndexType_FLAT {
 		t.Errorf("IndexType = %v, want FLAT", info.GetIndexType())
@@ -84,26 +82,26 @@ func TestClient_Index_CreatesWhenMissing(t *testing.T) {
 
 func TestIndex_Drop(t *testing.T) {
 	c, fake := newFakeClient(t)
-	fake.indexList = []string{"rune"}
+	fake.indexList = []string{"demo"}
 
-	idx, _ := c.Index(context.Background(), WithIndexName("rune"))
+	idx, _ := c.Index(context.Background(), WithIndexName("demo"))
 	if err := idx.Drop(context.Background()); err != nil {
 		t.Fatalf("Drop: %v", err)
 	}
-	if !reflect.DeepEqual(fake.deleteIndexCalls, []string{"rune"}) {
+	if !reflect.DeepEqual(fake.deleteIndexCalls, []string{"demo"}) {
 		t.Errorf("deleteIndexCalls = %v", fake.deleteIndexCalls)
 	}
 }
 
 func TestIndex_GetMetadata(t *testing.T) {
 	c, fake := newFakeClient(t)
-	fake.indexList = []string{"rune"}
+	fake.indexList = []string{"demo"}
 	fake.metadataRows = []*es2pb.Metadata{
 		{Id: 1, Data: `{"a":"first"}`},
 		{Id: 2, Data: `{"a":"second"}`},
 	}
 
-	idx, _ := c.Index(context.Background(), WithIndexName("rune"))
+	idx, _ := c.Index(context.Background(), WithIndexName("demo"))
 	got, err := idx.GetMetadata(context.Background(),
 		[]MetadataRef{{ShardIdx: 0, RowIdx: 1}, {ShardIdx: 0, RowIdx: 2}},
 		[]string{"metadata"})
@@ -114,7 +112,7 @@ func TestIndex_GetMetadata(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
-	if fake.getMetadataReq.GetIndexName() != "rune" {
+	if fake.getMetadataReq.GetIndexName() != "demo" {
 		t.Errorf("IndexName = %q", fake.getMetadataReq.GetIndexName())
 	}
 	if len(fake.getMetadataReq.GetIdx()) != 2 {

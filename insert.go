@@ -12,7 +12,7 @@ const insertChunkSize = 1 * 1024 * 1024
 
 // InsertRequest carries plaintext vectors and one parallel metadata string
 // per vector. Metadata is stored verbatim — the SDK never interprets it
-// (rune uses a JSON envelope; other callers may store anything).
+// (callers commonly pass a JSON envelope; opaque blobs work equally well).
 type InsertRequest struct {
 	Vectors  [][]float32
 	Metadata []string
@@ -31,11 +31,18 @@ func (i *Index) Insert(ctx context.Context, req InsertRequest) (*InsertResult, e
 	if i.client.conn == nil {
 		return nil, ErrClientClosed
 	}
-	if i.keys == nil || i.keys.closed {
+	if i.keys == nil {
 		return nil, ErrKeysRequired
 	}
 	if len(req.Vectors) == 0 {
 		return &InsertResult{}, nil
+	}
+	if d := i.keys.Dim(); d > 0 {
+		for j, v := range req.Vectors {
+			if len(v) != d {
+				return nil, fmt.Errorf("envector: insert vector %d has dim %d, keys expect %d", j, len(v), d)
+			}
+		}
 	}
 
 	ciphers, err := i.keys.Encrypt(req.Vectors)

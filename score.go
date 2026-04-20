@@ -22,6 +22,11 @@ func (i *Index) Score(ctx context.Context, query []float32) ([][]byte, error) {
 	if i.client.conn == nil {
 		return nil, ErrClientClosed
 	}
+	if i.keys != nil {
+		if d := i.keys.Dim(); d > 0 && len(query) != d {
+			return nil, fmt.Errorf("envector: score query dim %d, keys expect %d", len(query), d)
+		}
+	}
 	queryID := randomQueryID()
 	req := &es2epb.InnerProductRequest{
 		Header:    &es2pb.RequestHeader{Type: es2pb.MessageType_InnerProduct},

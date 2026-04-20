@@ -38,8 +38,8 @@ func (c *Client) RegisterKeys(ctx context.Context, keys *Keys) error {
 	if c.conn == nil {
 		return ErrClientClosed
 	}
-	if keys == nil || keys.closed {
-		return ErrKeysClosed
+	if keys == nil || keys.evalKeyBytes == nil {
+		return ErrKeysNotForRegister
 	}
 
 	stream, err := c.stub.RegisterKey(c.authCtx(ctx))
@@ -51,6 +51,8 @@ func (c *Client) RegisterKeys(ctx context.Context, keys *Keys) error {
 	info := &es2pb.KeyInfo{
 		KeyId:     keys.id,
 		Type:      "EvalKey",
+		Preset:    keys.preset,
+		EvalMode:  keys.evalMode,
 		Sha256Sum: hex.EncodeToString(sum[:]),
 	}
 	total := len(keys.evalKeyBytes)
@@ -137,26 +139,20 @@ func (c *Client) DeleteKeys(ctx context.Context, keyID string) error {
 // ActivateKeys makes the given bundle the single resident key on the
 // server. It runs the 4-RPC auto-setup sequence required when only one
 // key may be loaded at a time: list existing keys, RegisterKeys if absent,
-// UnloadKeys on every other key, then LoadKeys on the target.
-//
-// A Keys handle may only be activated against one Client at a time.
-// Attempting to activate the same handle through a second Client returns
-// ErrKeysAlreadyActivated; re-activating against the original Client is
-// idempotent.
+// UnloadKeys on every other key, then LoadKeys on the target. Repeating
+// the call with the same Client is idempotent (the sequence simply re-runs
+// against the same server state); using the same Keys against a different
+// Client is allowed and lets a single bundle drive multiple servers.
 func (c *Client) ActivateKeys(ctx context.Context, keys *Keys) error {
 	if c.conn == nil {
 		return ErrClientClosed
 	}
-	if keys == nil || keys.closed {
-		return ErrKeysClosed
+	if keys == nil || keys.evalKeyBytes == nil {
+		return ErrKeysNotForRegister
 	}
 
 	activationMu.Lock()
 	defer activationMu.Unlock()
-
-	if keys.activated != nil && keys.activated != c {
-		return ErrKeysAlreadyActivated
-	}
 
 	list, err := c.GetKeysList(ctx)
 	if err != nil {
@@ -183,9 +179,5 @@ func (c *Client) ActivateKeys(ctx context.Context, keys *Keys) error {
 			return err
 		}
 	}
-	if err := c.LoadKeys(ctx, keys.id); err != nil {
-		return err
-	}
-	keys.activated = c
-	return nil
+	return c.LoadKeys(ctx, keys.id)
 }
