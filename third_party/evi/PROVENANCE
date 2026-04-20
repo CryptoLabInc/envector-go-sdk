@@ -1,34 +1,168 @@
-third_party/evi/ — libevi_crypto redistribution (Pattern C)
-============================================================
+third_party/evi/ — libevi_crypto redistribution (Pattern C, static-only)
+=========================================================================
 
-This tree ships prebuilt libevi_crypto libraries + C++ headers alongside the
-Go source so that `go get github.com/CryptoLabInc/envector-go-sdk` plus
-`-tags libevi` can build the capture path without any external C++ toolchain
-on the consumer side.
+This tree ships prebuilt static archives + C/C++ headers alongside the Go
+source so that `go get github.com/CryptoLabInc/envector-go-sdk` plus
+`-tags libevi` can produce a self-contained single Go binary via cgo
+without any external C++ toolchain on the consumer side.
+
+Only static archives ship. Shared variants (.so/.dylib/.dll + MinGW import
+libs) are intentionally NOT redistributed — the SDK's contract is a single
+statically-linked binary, and shared libraries would just add weight and a
+runtime dependency.
+
+Four archives are shipped per platform:
+
+  libevi_c_api.a    Thin C ABI wrapper (`extern "C"` entry points such as
+                    `evi_context_create`, `evi_encryptor_create`, ...).
+                    This is what cgo links against directly.
+  libevi_crypto.a   Underlying C++ implementation that libevi_c_api calls
+                    into. Links with unresolved `deb::*` / `_alea_*`
+                    references that the two dependency archives below
+                    resolve. NONE-mode seal path only; OpenSSL-using
+                    SealInfo/AES-KEK code paths live in `.o` members that
+                    the static linker does not pull in when the SDK stays
+                    on `seal_mode=NONE` (verified on darwin_arm64: final
+                    binary's only dynamic deps are libc++ + libSystem).
+  libdeb.a          CPM-sourced dependency (CryptoLabInc/deb). Provides
+                    the CKKS numeric layer (`deb::*` C++ symbols) that
+                    libevi_crypto invokes. Not a transitive include of
+                    libevi_crypto because CMake's `target_link_libraries`
+                    only propagates link order, not archive contents.
+  libalea.a         Sub-library of deb, built alongside it via
+                    `DEB_INSTALL_ALEA=ON`. Provides the RNG primitives
+                    (`_alea_*` C symbols) that libdeb uses.
+
+The three-archive bundle (libevi_crypto + libdeb + libalea) mirrors the
+`evi/lib/` layout that pyenvector ships in its wheel; we take the same
+approach for the same reason.
 
 Expected layout
 ---------------
   third_party/evi/
-    include/                      # C++ headers: deb/Encryptor.hpp, Context.hpp, Types.hpp, ...
-    darwin_arm64/lib/libevi_crypto.{a,dylib}
-    darwin_amd64/lib/libevi_crypto.{a,dylib}
-    linux_amd64/lib/libevi_crypto.{a,so}
-    linux_arm64/lib/libevi_crypto.{a,so}
+    include/                                   # C/C++ headers (EVI/, evi_c/, km/, utils/, c_api.h)
+    linux_amd64/lib/libevi_c_api.a
+    linux_amd64/lib/libevi_crypto.a
+    linux_amd64/lib/libdeb.a
+    linux_amd64/lib/libalea.a
+    linux_arm64/lib/libevi_c_api.a
+    linux_arm64/lib/libevi_crypto.a
+    linux_arm64/lib/libdeb.a
+    linux_arm64/lib/libalea.a
+    darwin_amd64/lib/libevi_c_api.a
+    darwin_amd64/lib/libevi_crypto.a
+    darwin_amd64/lib/libdeb.a
+    darwin_amd64/lib/libalea.a
+    darwin_arm64/lib/libevi_c_api.a
+    darwin_arm64/lib/libevi_crypto.a
+    darwin_arm64/lib/libdeb.a
+    darwin_arm64/lib/libalea.a
+    windows_amd64/lib/libevi_c_api.a           # MinGW-w64 GCC archive (cgo-compatible)
+    windows_amd64/lib/libevi_crypto.a
+    windows_amd64/lib/libdeb.a
+    windows_amd64/lib/libalea.a
+
+All archives use the GCC/Clang archive format and are linkable by the
+gcc-family toolchains that cgo drives. MSVC-produced .lib files are NOT
+shipped here because cgo on Windows uses gcc, not cl.exe — the Windows
+slice is built with MSYS2 mingw-w64-x86_64.
+
+Link order
+----------
+cgo's LDFLAGS must list the wrapper first (most-dependent) and the RNG
+primitives last (least-dependent) so each archive resolves the next's
+unresolved references in a single left-to-right pass:
+
+  #cgo CPPFLAGS: -I${SRCDIR}/third_party/evi/include
+  #cgo darwin  LDFLAGS: -L${SRCDIR}/third_party/evi/<goos>_<goarch>/lib \
+                        -levi_c_api -levi_crypto -ldeb -lalea -lc++ -lm
+  #cgo linux   LDFLAGS: -L${SRCDIR}/third_party/evi/<goos>_<goarch>/lib \
+                        -levi_c_api -levi_crypto -ldeb -lalea -lstdc++ -lm
+  #cgo windows LDFLAGS: -L${SRCDIR}/third_party/evi/<goos>_<goarch>/lib \
+                        -levi_c_api -levi_crypto -ldeb -lalea -lstdc++ -lm
+
+darwin uses libc++ (Apple default), linux/MinGW use libstdc++. No
+`-lssl -lcrypto` needed on the NONE-seal path — libevi_crypto.a's
+OpenSSL-using members are not pulled in by the linker. If future SDK
+features add AES-KEK or key-management paths, append platform-appropriate
+OpenSSL link flags at that time.
 
 Source of truth
 ---------------
   Upstream repo : github.com/CryptoLabInc/evi-crypto   (public)
-  Pinned commit : TBD — fill in when first binary set is committed
-  Build command : scripts/refresh-evi.sh
+  Pinned commit : abac91d9a06361e4e5e831c5b660763d19529e6b
+                  (branch ci/release-workflow — ships libdeb.a + libalea.a
+                   alongside libevi_c_api.a + libevi_crypto.a in the
+                   release artifact. Update to the upstream-main SHA once
+                   that branch lands.)
+  Build command : scripts/refresh-evi.sh   (single-host path)
+  CI workflow   : .github/workflows/release.yml in evi-crypto, job suite
+                  "release artifacts" — builds every platform in one run
+                  with BUILD_AS_STATIC=ON, BUILD_C_API=ON.
 
 How to refresh
 --------------
 1. Clone or update CryptoLabInc/evi-crypto locally.
 2. Run `scripts/refresh-evi.sh <path-to-evi-crypto-checkout>` from the repo root.
-3. The script cmake-builds for each supported target and copies the resulting
-   libs + headers into this tree.
+3. The script cmake-builds for the current host and copies all four static
+   archives (libevi_c_api.a, libevi_crypto.a, libdeb.a, libalea.a) plus
+   headers into this tree.
 4. Update the "Pinned commit" line above with the evi-crypto commit hash.
-5. Commit the changed binaries + this file in the same PR.
+5. Regenerate the SHA256 tables below via
+   `shasum -a 256 <goos>_<goarch>/lib/*.a` and
+   `shasum -a 256 evi-crypto-*.tar.gz`.
+6. Commit the changed archives + this file in the same PR.
+
+Multi-platform refresh via CI
+-----------------------------
+`scripts/refresh-evi.sh` only covers the current host. To refresh every
+platform in one shot, use the upstream release workflow:
+
+1. In evi-crypto, trigger `.github/workflows/release.yml` (tag push `v*`
+   or manual `workflow_dispatch`).
+2. Download evi-crypto-<goos>_<goarch>.tar.gz for each of
+   linux_amd64, linux_arm64, darwin_amd64, darwin_arm64, windows_amd64.
+3. Extract each archive and copy all four `lib/*.a` files
+   (libevi_c_api.a, libevi_crypto.a, libdeb.a, libalea.a) into
+   `third_party/evi/<goos>_<goarch>/lib/`. Do not copy any shared
+   libraries (.so / .dylib / .dll / .dll.a) — the SDK contract is
+   static-only.
+4. Copy `include/` from any one *nix archive into `third_party/evi/include/`
+   — headers are source-level and bit-identical across Unix artifacts.
+   (If windows_amd64 is your only source, strip CRLF first; MSYS2 tar
+    preserves LF so this is unlikely to matter in practice.)
+5. Refresh the SHA256 tables below and bump the "Pinned commit" line.
+
+SHA256 (artifact archives)
+--------------------------
+  1df1e780462636f8a4009654c9a33c83917897cd96069d8e1a92bf78f9ccf448  evi-crypto-linux_amd64.tar.gz
+  022098121ae525033366ca510f2cb1f15b05de584c2a23a84facfc9beacf051c  evi-crypto-linux_arm64.tar.gz
+  82a0e21e0bb91c4878ecc0eb16044941983ba74daa6a1fe7f08a3892dc2d2829  evi-crypto-darwin_amd64.tar.gz
+  e74f7de8d499f3aeb68265f681e8b04bd25b7378507458ff49ad26ef50a2d08e  evi-crypto-darwin_arm64.tar.gz
+  adb98bfd6050c00209d926527ec0c89605a2318fc93990c232bb18529e05fbdd  evi-crypto-windows_amd64.tar.gz
+
+SHA256 (installed libraries)
+----------------------------
+  461b4c2e92222d385be237e1bd7956fbc373732f683d6f2ae98c47669067c4ee  linux_amd64/lib/libevi_c_api.a
+  37fd1dd9701681f278c847a2ae5a3002bd559b07cb1f73224e5b9deab6d0b22e  linux_amd64/lib/libevi_crypto.a
+  cca15c1051b147c3e2a4f3e0ce77d00b6ca6bedcd592961644e554b3fb1cdc71  linux_amd64/lib/libdeb.a
+  c7682cedf94baa3a2dac58ea7fc7a4ba399e1dc3873f3dd2a4f0b096f73c2390  linux_amd64/lib/libalea.a
+  ee1ce223d3bc6eb0ca22f48b64995e0821f2e23d6aa5d91532edfb177f57e88b  linux_arm64/lib/libevi_c_api.a
+  b7f6fe10b2d8a0e1b52626b60597eb5cd129100ebbd5a427f0f7f96069055ec5  linux_arm64/lib/libevi_crypto.a
+  4ab7b1644c7c00fcad1de8ca0df3274c6b8e5c4b30dc70302d176da7da019ea4  linux_arm64/lib/libdeb.a
+  937ecdcbac065b26d8a1e0d297dec9dd61fa78eba2c24ed481a899ff1a94538e  linux_arm64/lib/libalea.a
+  01a905a434a73df0b1bcdaf3136309544d4c831a141b8068c994c91eff4e130e  darwin_amd64/lib/libevi_c_api.a
+  c8623d94e0006212a93f35e72988454f85f7c5f4e2636f1779093e40fb903c7a  darwin_amd64/lib/libevi_crypto.a
+  978595729016bda1b63cdfe805aa32edfaeaae855213f61eca1b15c17fdc7fdc  darwin_amd64/lib/libdeb.a
+  454871284a362c370d2c59f7350f6bc8ac1b00e395139fb046a97607e51874e3  darwin_amd64/lib/libalea.a
+  4aaa18c4a93cfc401fb752a4e1c9ceea1223131a5f0c456b61320bb6d1e0384f  darwin_arm64/lib/libevi_c_api.a
+  45aa5bed91ffaa8ec5ed973efb7d3f70be14bdad6659bf65cc9c9e336c02aa1b  darwin_arm64/lib/libevi_crypto.a
+  741d231156b173b49bdd590f44db0173e2ddf99b7f65ec39417f5cd0e73d576a  darwin_arm64/lib/libdeb.a
+  664e1b23c01883a7d8a0bd8bc5e42d99ff2f26a71f81831b820106a7c38735d8  darwin_arm64/lib/libalea.a
+  a15256bff4dac55a6908611a468f3056b910bc097767bb4364475ef165abad8e  windows_amd64/lib/libevi_c_api.a
+  594d9f0e03b22bbd6587f7cf9a7c985f371945face42c8f07bcbb5e307720235  windows_amd64/lib/libevi_crypto.a
+  030fefeaef99a0e0548e45e9a73f641b3d5e4b3b47e99dae605b1fb737bb323e  windows_amd64/lib/libdeb.a
+  c7f219d41cacefe7888e1e9e84ce9bac0182e300be6e66f66464ca7afc21e289  windows_amd64/lib/libalea.a
 
 Cross-compile escape hatch
 --------------------------
