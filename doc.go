@@ -11,7 +11,7 @@
 // NewClient dials lazily; the underlying gRPC connection is not opened
 // until the first RPC. Release with Close.
 //
-//	client, err := envector.NewClient(ctx,
+//	client, err := envector.NewClient(
 //	    envector.WithAddress("envector.example.com:443"),
 //	    envector.WithAccessToken(token),
 //	)

@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewClient_DefaultsApplied(t *testing.T) {
-	c, err := NewClient(context.Background(),
+	c, err := NewClient(
 		WithAddress("127.0.0.1:1"),
 		WithInsecure(),
 	)
@@ -35,7 +35,7 @@ func TestNewClient_DefaultsApplied(t *testing.T) {
 }
 
 func TestNewClient_OverridesTakeEffect(t *testing.T) {
-	c, err := NewClient(context.Background(),
+	c, err := NewClient(
 		WithAddress("127.0.0.1:1"),
 		WithInsecure(),
 		WithDialTimeout(5*time.Second),
@@ -52,14 +52,14 @@ func TestNewClient_OverridesTakeEffect(t *testing.T) {
 }
 
 func TestNewClient_RequiresAddress(t *testing.T) {
-	_, err := NewClient(context.Background())
+	_, err := NewClient()
 	if !errors.Is(err, ErrAddressRequired) {
 		t.Fatalf("expected ErrAddressRequired, got %v", err)
 	}
 }
 
 func TestNewClient_Insecure_LazyConnect(t *testing.T) {
-	c, err := NewClient(context.Background(),
+	c, err := NewClient(
 		WithAddress("127.0.0.1:1"),
 		WithInsecure(),
 	)
@@ -78,7 +78,7 @@ func TestNewClient_Insecure_LazyConnect(t *testing.T) {
 }
 
 func TestClient_CallsAfterCloseReturnErrClientClosed(t *testing.T) {
-	c, err := NewClient(context.Background(),
+	c, err := NewClient(
 		WithAddress("127.0.0.1:1"),
 		WithInsecure(),
 	)

@@ -29,8 +29,7 @@ type Client struct {
 // At minimum pass WithAddress; use WithInsecure for non-TLS endpoints
 // (local dev, bufconn tests). The connection is opened lazily — the first
 // RPC establishes the underlying channel.
-func NewClient(ctx context.Context, opts ...ClientOption) (*Client, error) {
-	_ = ctx
+func NewClient(opts ...ClientOption) (*Client, error) {
 	o := defaultClientOptions()
 	for _, opt := range opts {
 		opt(&o)
