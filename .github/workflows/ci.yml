@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    label: linux/amd64 }
+          - { os: ubuntu-24.04-arm, label: linux/arm64 }
+          - { os: macos-13,         label: darwin/amd64 }
+          - { os: macos-14,         label: darwin/arm64 }
+          - { os: windows-latest,   label: windows/amd64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev
+
+      - name: Install system deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install openssl@3
+
+      - name: Set up MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: inherit
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-openssl
+
+      - name: Build & test (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          go vet ./...
+          go build ./...
+          go test ./...
+
+      - name: Build & test (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          go vet ./...
+          go build ./...
+          go test ./...
