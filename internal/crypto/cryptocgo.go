@@ -35,7 +35,13 @@ package crypto
 // Intel; both search paths are supplied so the linker picks whichever
 // exists. Linux assumes system libssl-dev. Windows assumes MSYS2
 // mingw-w64-x86_64-openssl.
-#cgo CPPFLAGS: -I${SRCDIR}/../../third_party/evi/include
+// EVI_STATIC tells EVI/Export.hpp to leave EVI_API empty on all
+// platforms. We link against the bundled static archives
+// (libevi_c_api.a, libevi_crypto.a), so Windows must not treat the
+// API-annotated class/function declarations in km/KeyManager.hpp as
+// __declspec(dllimport) — otherwise mingw emits __imp_<mangled>
+// references that the static archive does not provide.
+#cgo CPPFLAGS: -I${SRCDIR}/../../third_party/evi/include -DEVI_STATIC
 #cgo CXXFLAGS: -std=c++17
 #cgo darwin,arm64  LDFLAGS: -L${SRCDIR}/../../third_party/evi/darwin_arm64/lib  -levi_c_api -levi_crypto -ldeb -lalea -L/opt/homebrew/opt/openssl@3/lib -L/usr/local/opt/openssl@3/lib -lssl -lcrypto -lc++ -lm
 #cgo darwin,amd64  LDFLAGS: -L${SRCDIR}/../../third_party/evi/darwin_amd64/lib  -levi_c_api -levi_crypto -ldeb -lalea -L/usr/local/opt/openssl@3/lib -L/opt/homebrew/opt/openssl@3/lib -lssl -lcrypto -lc++ -lm
