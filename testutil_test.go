@@ -10,6 +10,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 
 	es2pb "github.com/CryptoLabInc/envector-go-sdk/internal/transport/pb/es2"
@@ -43,6 +44,17 @@ type fakeES2E struct {
 	createIndexRC es2pb.ReturnCode
 	headerErr     es2pb.ReturnCode
 
+	// Per-RPC ReturnCode overrides. When non-zero, the specific handler
+	// returns that ReturnCode instead of falling back to headerErr/Success.
+	getKeyListRC  es2pb.ReturnCode
+	registerKeyRC es2pb.ReturnCode
+	unloadKeyRC   es2pb.ReturnCode
+	loadKeyRC     es2pb.ReturnCode
+
+	// lastIncomingMD captures the metadata of the most recent unary RPC
+	// so tests can assert header injection.
+	lastIncomingMD metadata.MD
+
 	onInnerProduct func(req *es2epb.InnerProductRequest, send func(*es2epb.InnerProductResponse) error) error
 }
 
@@ -57,6 +69,19 @@ func (f *fakeES2E) header() *es2pb.ResponseHeader {
 	return okHeader()
 }
 
+func (f *fakeES2E) headerFor(rc es2pb.ReturnCode) *es2pb.ResponseHeader {
+	if rc != 0 {
+		return &es2pb.ResponseHeader{ReturnCode: rc, ErrorMessage: "fake error"}
+	}
+	return f.header()
+}
+
+func (f *fakeES2E) captureMD(ctx context.Context) {
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		f.lastIncomingMD = md
+	}
+}
+
 func (f *fakeES2E) GetIndexList(ctx context.Context, req *es2epb.GetIndexListRequest) (*es2epb.GetIndexListResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -67,22 +92,23 @@ func (f *fakeES2E) GetIndexList(ctx context.Context, req *es2epb.GetIndexListReq
 func (f *fakeES2E) GetKeyList(ctx context.Context, req *es2epb.GetKeyListRequest) (*es2epb.GetKeyListResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.captureMD(ctx)
 	f.getKeyListCalls++
-	return &es2epb.GetKeyListResponse{Header: f.header(), KeyId: append([]string{}, f.keyList...)}, nil
+	return &es2epb.GetKeyListResponse{Header: f.headerFor(f.getKeyListRC), KeyId: append([]string{}, f.keyList...)}, nil
 }
 
 func (f *fakeES2E) LoadKey(ctx context.Context, req *es2epb.LoadKeyRequest) (*es2epb.LoadKeyResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.loadKeyCalls = append(f.loadKeyCalls, req.GetKeyId())
-	return &es2epb.LoadKeyResponse{Header: f.header()}, nil
+	return &es2epb.LoadKeyResponse{Header: f.headerFor(f.loadKeyRC)}, nil
 }
 
 func (f *fakeES2E) UnloadKey(ctx context.Context, req *es2epb.UnloadKeyRequest) (*es2epb.UnloadKeyResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.unloadKeyCalls = append(f.unloadKeyCalls, req.GetKeyId())
-	return &es2epb.UnloadKeyResponse{Header: f.header()}, nil
+	return &es2epb.UnloadKeyResponse{Header: f.headerFor(f.unloadKeyRC)}, nil
 }
 
 func (f *fakeES2E) DeleteKey(ctx context.Context, req *es2epb.DeleteKeyRequest) (*es2epb.DeleteKeyResponse, error) {
@@ -120,7 +146,7 @@ func (f *fakeES2E) RegisterKey(stream grpc.ClientStreamingServer[es2epb.Register
 		f.registerKeyChunks = append(f.registerKeyChunks, append([]byte(nil), msg.GetKey().GetValue()...))
 		f.mu.Unlock()
 	}
-	return stream.SendAndClose(&es2epb.RegisterKeyResponse{Header: f.header()})
+	return stream.SendAndClose(&es2epb.RegisterKeyResponse{Header: f.headerFor(f.registerKeyRC)})
 }
 
 func (f *fakeES2E) CreateIndex(stream grpc.ClientStreamingServer[es2epb.CreateIndexRequest, es2epb.CreateIndexResponse]) error {

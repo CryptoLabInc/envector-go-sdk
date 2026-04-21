@@ -77,6 +77,31 @@ func TestNewClient_Insecure_LazyConnect(t *testing.T) {
 	}
 }
 
+func TestClient_AuthCtx_InjectsBearerToken(t *testing.T) {
+	c, fake := newFakeClient(t)
+	c.opts.AccessToken = "tok-123"
+
+	if _, err := c.GetKeysList(context.Background()); err != nil {
+		t.Fatalf("GetKeysList: %v", err)
+	}
+	got := fake.lastIncomingMD.Get("authorization")
+	if len(got) != 1 || got[0] != "Bearer tok-123" {
+		t.Errorf("authorization metadata = %v, want [Bearer tok-123]", got)
+	}
+}
+
+func TestClient_AuthCtx_OmitsHeaderWhenUnset(t *testing.T) {
+	c, fake := newFakeClient(t)
+	// default opts: no AccessToken
+
+	if _, err := c.GetKeysList(context.Background()); err != nil {
+		t.Fatalf("GetKeysList: %v", err)
+	}
+	if got := fake.lastIncomingMD.Get("authorization"); len(got) != 0 {
+		t.Errorf("authorization metadata = %v, want none", got)
+	}
+}
+
 func TestClient_CallsAfterCloseReturnErrClientClosed(t *testing.T) {
 	c, err := NewClient(
 		WithAddress("127.0.0.1:1"),

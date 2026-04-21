@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	es2pb "github.com/CryptoLabInc/envector-go-sdk/internal/transport/pb/es2"
 )
 
 // openTestKeys produces a *Keys backed by the mock crypto provider, suitable
@@ -149,6 +151,79 @@ func TestActivateKeys_AcrossClients_AllowsBoth(t *testing.T) {
 	}
 	if err := c2.ActivateKeys(context.Background(), keys); err != nil {
 		t.Errorf("ActivateKeys c2: same Keys against second Client must be allowed, got %v", err)
+	}
+}
+
+func TestActivateKeys_GetKeysListFails_ShortCircuits(t *testing.T) {
+	c, fake := newFakeClient(t)
+	keys := openTestKeys(t)
+	fake.getKeyListRC = es2pb.ReturnCode_Fail
+
+	err := c.ActivateKeys(context.Background(), keys)
+	if err == nil {
+		t.Fatal("expected error from GetKeysList")
+	}
+	if len(fake.registerKeyChunks) != 0 {
+		t.Error("RegisterKeys must not run when GetKeysList fails")
+	}
+	if len(fake.unloadKeyCalls) != 0 || len(fake.loadKeyCalls) != 0 {
+		t.Errorf("no unload/load expected; got unload=%v load=%v",
+			fake.unloadKeyCalls, fake.loadKeyCalls)
+	}
+}
+
+func TestActivateKeys_RegisterFails_SkipsUnloadAndLoad(t *testing.T) {
+	c, fake := newFakeClient(t)
+	keys := openTestKeys(t)
+	fake.keyList = []string{"stale-a"} // absent: Register must run
+	fake.registerKeyRC = es2pb.ReturnCode_Fail
+
+	if err := c.ActivateKeys(context.Background(), keys); err == nil {
+		t.Fatal("expected error from RegisterKeys")
+	}
+	if len(fake.registerKeyChunks) == 0 {
+		t.Error("Register should have been attempted")
+	}
+	if len(fake.unloadKeyCalls) != 0 {
+		t.Errorf("UnloadKeys must not run after Register failure; got %v", fake.unloadKeyCalls)
+	}
+	if len(fake.loadKeyCalls) != 0 {
+		t.Errorf("LoadKeys must not run after Register failure; got %v", fake.loadKeyCalls)
+	}
+}
+
+func TestActivateKeys_UnloadFails_SkipsLoad(t *testing.T) {
+	c, fake := newFakeClient(t)
+	keys := openTestKeys(t)
+	// key already present → Register skipped; stale-a present → Unload runs
+	fake.keyList = []string{keys.id, "stale-a"}
+	fake.unloadKeyRC = es2pb.ReturnCode_Fail
+
+	if err := c.ActivateKeys(context.Background(), keys); err == nil {
+		t.Fatal("expected error from UnloadKeys")
+	}
+	if len(fake.registerKeyChunks) != 0 {
+		t.Error("Register must be skipped when key already present")
+	}
+	if !reflect.DeepEqual(fake.unloadKeyCalls, []string{"stale-a"}) {
+		t.Errorf("unload = %v, want [stale-a]", fake.unloadKeyCalls)
+	}
+	if len(fake.loadKeyCalls) != 0 {
+		t.Errorf("LoadKeys must not run after Unload failure; got %v", fake.loadKeyCalls)
+	}
+}
+
+func TestActivateKeys_LoadFails_PropagatesError(t *testing.T) {
+	c, fake := newFakeClient(t)
+	keys := openTestKeys(t)
+	fake.keyList = []string{keys.id} // present, no stale
+	fake.loadKeyRC = es2pb.ReturnCode_Fail
+
+	if err := c.ActivateKeys(context.Background(), keys); err == nil {
+		t.Fatal("expected error from LoadKeys")
+	}
+	if !reflect.DeepEqual(fake.loadKeyCalls, []string{keys.id}) {
+		t.Errorf("load = %v, want [%s]", fake.loadKeyCalls, keys.id)
 	}
 }
 

@@ -11,5 +11,4 @@ var (
 	ErrKeysNotForEncrypt  = errors.New("envector: keys opened without KeyPartEnc cannot encrypt")
 	ErrKeysNotForDecrypt  = errors.New("envector: keys opened without KeyPartSec cannot decrypt")
 	ErrKeysNotForRegister = errors.New("envector: keys opened without KeyPartEval have no eval key for register/activate")
-	ErrNotImplemented     = errors.New("envector: not implemented")
 )
