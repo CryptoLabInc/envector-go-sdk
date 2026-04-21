@@ -5,7 +5,7 @@ embeddings. The surface covers the retriever path (`Score` +
 `GetMetadata`), the capture path (`Insert` with a local FHE encrypt
 step), and the key/index lifecycle needed to stand a deployment up.
 
-Status: pre-1.0 (`Version = "0.0.0"`).
+Status: pre-1.0 (`Version = "0.1.0"`).
 
 ## Requirements
 

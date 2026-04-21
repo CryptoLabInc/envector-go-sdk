@@ -15,7 +15,7 @@ import (
 	es2epb "github.com/CryptoLabInc/envector-go-sdk/internal/transport/pb/es2e"
 )
 
-const Version = "0.0.0"
+const Version = "0.1.0"
 
 // Client is a gRPC handle to an enVector server. Construct one with
 // NewClient and release with Close. Methods are safe for concurrent use.
