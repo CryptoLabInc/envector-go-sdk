@@ -19,8 +19,8 @@ jobs:
         include:
           - { os: ubuntu-latest,    label: linux/amd64 }
           - { os: ubuntu-24.04-arm, label: linux/arm64 }
-          - { os: macos-13,         label: darwin/amd64 }
           - { os: macos-14,         label: darwin/arm64 }
+          - { os: macos-14,         label: darwin/amd64 }  # cross-built on arm64, run via Rosetta 2
           - { os: windows-latest,   label: windows/amd64 }
     steps:
       - uses: actions/checkout@v4
@@ -36,9 +36,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential libssl-dev
 
-      - name: Install system deps (macOS)
-        if: runner.os == 'macOS'
+      - name: Install system deps (darwin/arm64)
+        if: matrix.label == 'darwin/arm64'
         run: brew install openssl@3
+
+      - name: Install system deps (darwin/amd64 via Rosetta)
+        if: matrix.label == 'darwin/amd64'
+        run: |
+          # Rosetta 2 is needed to exec x86_64 test binaries on Apple Silicon
+          # runners. Idempotent — a no-op if already installed.
+          softwareupdate --install-rosetta --agree-to-license || true
+          # Intel Homebrew at /usr/local provides x86_64 openssl@3, which
+          # the cgo darwin,amd64 LDFLAGS already point at.
+          arch -x86_64 /bin/bash -c 'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+          arch -x86_64 /usr/local/bin/brew install openssl@3
 
       - name: Set up MSYS2 (Windows)
         if: runner.os == 'Windows'
@@ -51,8 +62,20 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-openssl
 
-      - name: Build & test (Unix)
-        if: runner.os != 'Windows'
+      - name: Build & test (native)
+        if: runner.os != 'Windows' && matrix.label != 'darwin/amd64'
+        run: |
+          go vet ./...
+          go build ./...
+          go test ./...
+
+      - name: Build & test (darwin/amd64 cross via Rosetta)
+        if: matrix.label == 'darwin/amd64'
+        env:
+          GOARCH: amd64
+          CGO_ENABLED: "1"
+          CC: clang -arch x86_64
+          CXX: clang++ -arch x86_64
         run: |
           go vet ./...
           go build ./...
