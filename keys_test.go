@@ -131,17 +131,31 @@ func TestKeys_EncryptProducesDistinctCiphertexts(t *testing.T) {
 		vec1[i] = float32(i) / 128
 		vec2[i] = float32(128-i) / 128
 	}
-	ciphers, err := keys.Encrypt([][]float32{vec1, vec2})
+	ciphers, innerCounts, err := keys.Encrypt([][]float32{vec1, vec2})
 	if err != nil {
 		t.Fatalf("Encrypt: %v", err)
 	}
-	if len(ciphers) != 2 {
-		t.Fatalf("got %d ciphers, want 2", len(ciphers))
+	if len(ciphers) != len(innerCounts) {
+		t.Fatalf("ciphers/innerCounts length mismatch: %d vs %d", len(ciphers), len(innerCounts))
 	}
-	if len(ciphers[0]) == 0 || len(ciphers[1]) == 0 {
-		t.Fatal("ciphertexts must be non-empty")
+	var total int
+	for _, c := range innerCounts {
+		total += c
 	}
-	if bytes.Equal(ciphers[0], ciphers[1]) {
+	if total != 2 {
+		t.Fatalf("sum(innerCounts) = %d, want 2 (logical input count)", total)
+	}
+	for i, b := range ciphers {
+		if len(b) == 0 {
+			t.Fatalf("ciphertext %d is empty", i)
+		}
+	}
+	// Distinct plaintext inputs must not collapse into a byte-identical
+	// ciphertext. When libevi keeps them in separate ciphers we compare
+	// those directly; when it slot-packs them into one cipher, the
+	// distinctness claim collapses to "the packed cipher is non-empty",
+	// already asserted above.
+	if len(ciphers) >= 2 && bytes.Equal(ciphers[0], ciphers[1]) {
 		t.Error("distinct vectors must yield distinct ciphertexts")
 	}
 	// Decrypt round trip is exercised end-to-end against a real server in
@@ -155,7 +169,7 @@ func TestKeys_AfterClose(t *testing.T) {
 	keys, _ := OpenKeysFromFile(baseKeyOpts(dir)...)
 	_ = keys.Close()
 
-	if _, err := keys.Encrypt([][]float32{{1}}); !errors.Is(err, ErrKeysNotForEncrypt) {
+	if _, _, err := keys.Encrypt([][]float32{{1}}); !errors.Is(err, ErrKeysNotForEncrypt) {
 		t.Errorf("Encrypt after Close: got %v, want ErrKeysNotForEncrypt", err)
 	}
 	if _, _, err := keys.Decrypt(nil); !errors.Is(err, ErrKeysNotForDecrypt) {
@@ -236,7 +250,7 @@ func TestOpenKeysFromFile_PartsSec_VaultSide(t *testing.T) {
 		t.Error("evalKeyBytes must not be loaded without KeyPartEval")
 	}
 
-	if _, err := keys.Encrypt([][]float32{{1, 2}}); !errors.Is(err, ErrKeysNotForEncrypt) {
+	if _, _, err := keys.Encrypt([][]float32{{1, 2}}); !errors.Is(err, ErrKeysNotForEncrypt) {
 		t.Errorf("Encrypt without KeyPartEnc: got %v, want ErrKeysNotForEncrypt", err)
 	}
 }
@@ -282,7 +296,7 @@ func TestOpenKeysFromFile_LegacyBinBundle(t *testing.T) {
 	for i := range vec {
 		vec[i] = float32(i) / 128
 	}
-	if _, err := keys.Encrypt([][]float32{vec}); err != nil {
+	if _, _, err := keys.Encrypt([][]float32{vec}); err != nil {
 		t.Fatalf("Encrypt: %v", err)
 	}
 }

@@ -19,7 +19,14 @@ type CKKSContext interface {
 }
 
 type Encryptor interface {
-	EncryptMultiple(vectors [][]float32, encodeType string) ([][]byte, error)
+	// EncryptMultiple serializes an FHE-encrypted query per output ciphertext.
+	// libevi packs multiple plaintext vectors into a smaller set of ciphertexts
+	// via CKKS slot packing; the packing ratio is decided internally and not
+	// known to the caller. innerCounts[i] reports how many logical input
+	// vectors got packed into ciphers[i] — sum(innerCounts) == len(vectors).
+	// Callers (Index.Insert) pass innerCounts through to the server so item
+	// IDs and metadata slots align with logical vectors, not ciphertexts.
+	EncryptMultiple(vectors [][]float32, encodeType string) (ciphers [][]byte, innerCounts []int, err error)
 	Close() error
 }
 

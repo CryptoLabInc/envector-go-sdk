@@ -64,8 +64,11 @@ func TestCGO_KeyGen_WritesBinFiles(t *testing.T) {
 }
 
 // TestCGO_Encrypt_BulkReturnsNonEmpty generates a key set, opens an
-// Encryptor against it, and verifies that EncryptMultiple produces one
-// non-empty serialized query per input vector.
+// Encryptor against it, and verifies that EncryptMultiple produces a
+// non-empty serialized query per returned ciphertext and a parallel
+// innerCounts slice whose sum matches the logical input vector count
+// (libevi may pack multiple input vectors into a single ciphertext via
+// CKKS slot packing, so len(out) can be < len(input)).
 func TestCGO_Encrypt_BulkReturnsNonEmpty(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "keys")
 	p := Default()
@@ -97,17 +100,25 @@ func TestCGO_Encrypt_BulkReturnsNonEmpty(t *testing.T) {
 	for i := range vec {
 		vec[i] = float32(i) / 128.0
 	}
-	out, err := enc.EncryptMultiple([][]float32{vec, vec}, "item")
+	const wantInputs = 2
+	out, innerCounts, err := enc.EncryptMultiple([][]float32{vec, vec}, "item")
 	if err != nil {
 		t.Fatalf("EncryptMultiple: %v", err)
 	}
-	if len(out) != 2 {
-		t.Fatalf("got %d ciphertexts, want 2", len(out))
+	if len(out) != len(innerCounts) {
+		t.Fatalf("ciphers/innerCounts length mismatch: %d vs %d", len(out), len(innerCounts))
 	}
 	for i, b := range out {
 		if len(b) == 0 {
 			t.Errorf("ciphertext %d is empty", i)
 		}
+	}
+	var totalItems int
+	for _, c := range innerCounts {
+		totalItems += c
+	}
+	if totalItems != wantInputs {
+		t.Fatalf("sum(innerCounts) = %d, want %d (logical input count)", totalItems, wantInputs)
 	}
 }
 

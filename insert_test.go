@@ -70,20 +70,26 @@ func TestIndex_Insert_StreamsPackedVectorsAndPassesMetadata(t *testing.T) {
 		t.Errorf("IndexName = %q", fake.batchInsertIndex)
 	}
 
+	// Flatten metadata across all packed ciphers — when libevi slot-packs
+	// multiple input vectors into one ciphertext, SDK emits one metadata
+	// entry per logical vector (count = innerItemCount, padded with ""
+	// beyond the caller's flat array). Comparing the flattened head to the
+	// caller's input preserves order regardless of packing decisions.
 	var allPacked []string
 	for _, frame := range fake.batchInsertPackets {
 		for _, pv := range frame {
 			if pv.GetVector().GetCipherVector() == nil {
 				t.Error("PackedVectors missing cipher_vector")
 			}
-			if md := pv.GetMetadata(); len(md) == 1 {
-				allPacked = append(allPacked, md[0])
-			}
+			allPacked = append(allPacked, pv.GetMetadata()...)
 		}
 	}
 	want := []string{`{"a":"x"}`, `{"a":"y"}`}
-	if !reflect.DeepEqual(allPacked, want) {
-		t.Errorf("metadata order = %v, want %v", allPacked, want)
+	if len(allPacked) < len(want) {
+		t.Fatalf("flattened metadata len %d < want %d", len(allPacked), len(want))
+	}
+	if !reflect.DeepEqual(allPacked[:len(want)], want) {
+		t.Errorf("metadata order = %v, want leading %v", allPacked, want)
 	}
 }
 

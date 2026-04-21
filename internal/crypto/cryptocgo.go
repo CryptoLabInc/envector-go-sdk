@@ -380,26 +380,26 @@ func (cgoProvider) NewEncryptor(ctxIface CKKSContext, keyDir string) (Encryptor,
 	return e, nil
 }
 
-func (e *cgoEncryptor) EncryptMultiple(vectors [][]float32, encodeType string) ([][]byte, error) {
+func (e *cgoEncryptor) EncryptMultiple(vectors [][]float32, encodeType string) ([][]byte, []int, error) {
 	if e.enc == nil || e.pack == nil {
-		return nil, errors.New("envector/crypto: encryptor closed")
+		return nil, nil, errors.New("envector/crypto: encryptor closed")
 	}
 	if len(vectors) == 0 {
-		return [][]byte{}, nil
+		return [][]byte{}, []int{}, nil
 	}
 	encTypeInt, err := encodeTypeToEnum(encodeType)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	n := len(vectors)
 	dim := len(vectors[0])
 	if dim == 0 {
-		return nil, errors.New("envector/crypto: vector dim must be > 0")
+		return nil, nil, errors.New("envector/crypto: vector dim must be > 0")
 	}
 	for i, v := range vectors {
 		if len(v) != dim {
-			return nil, fmt.Errorf("envector/crypto: vector %d has dim %d, want %d", i, len(v), dim)
+			return nil, nil, fmt.Errorf("envector/crypto: vector %d has dim %d, want %d", i, len(v), dim)
 		}
 	}
 
@@ -417,7 +417,7 @@ func (e *cgoEncryptor) EncryptMultiple(vectors [][]float32, encodeType string) (
 	for i, v := range vectors {
 		row := (*C.float)(C.malloc(C.size_t(dim) * C.size_t(unsafe.Sizeof(C.float(0)))))
 		if row == nil {
-			return nil, errors.New("envector/crypto: malloc failed")
+			return nil, nil, errors.New("envector/crypto: malloc failed")
 		}
 		rowPtrs[i] = row
 		rowSlice := unsafe.Slice(row, dim)
@@ -428,7 +428,7 @@ func (e *cgoEncryptor) EncryptMultiple(vectors [][]float32, encodeType string) (
 
 	ptrArr := (**C.float)(C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(uintptr(0)))))
 	if ptrArr == nil {
-		return nil, errors.New("envector/crypto: malloc failed")
+		return nil, nil, errors.New("envector/crypto: malloc failed")
 	}
 	defer C.free(unsafe.Pointer(ptrArr))
 	ptrSlice := unsafe.Slice(ptrArr, n)
@@ -450,24 +450,32 @@ func (e *cgoEncryptor) EncryptMultiple(vectors [][]float32, encodeType string) (
 		&outCount,
 	)
 	if st != C.EVI_STATUS_SUCCESS {
-		return nil, wrapEviError("evi_encryptor_encrypt_batch_with_pack", st)
+		return nil, nil, wrapEviError("evi_encryptor_encrypt_batch_with_pack", st)
 	}
 	defer C.evi_query_array_destroy(outQueries, outCount)
 
 	count := int(outCount)
 	queries := unsafe.Slice(outQueries, count)
 	result := make([][]byte, count)
+	innerCounts := make([]int, count)
 	for i, q := range queries {
 		var data *C.char
 		var size C.size_t
 		st := C.evi_query_serialize_to_string(q, &data, &size)
 		if st != C.EVI_STATUS_SUCCESS {
-			return nil, wrapEviError("evi_query_serialize_to_string", st)
+			return nil, nil, wrapEviError("evi_query_serialize_to_string", st)
 		}
 		result[i] = C.GoBytes(unsafe.Pointer(data), C.int(size))
 		C.free(unsafe.Pointer(data))
+
+		var inner C.uint32_t
+		st = C.evi_query_get_inner_item_count(q, &inner)
+		if st != C.EVI_STATUS_SUCCESS {
+			return nil, nil, wrapEviError("evi_query_get_inner_item_count", st)
+		}
+		innerCounts[i] = int(inner)
 	}
-	return result, nil
+	return result, innerCounts, nil
 }
 
 // --- decryptor -------------------------------------------------------------

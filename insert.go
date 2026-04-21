@@ -45,7 +45,7 @@ func (i *Index) Insert(ctx context.Context, req InsertRequest) (*InsertResult, e
 		}
 	}
 
-	ciphers, err := i.keys.Encrypt(req.Vectors)
+	ciphers, innerCounts, err := i.keys.Encrypt(req.Vectors)
 	if err != nil {
 		return nil, fmt.Errorf("envector: batch_insert_data encrypt: %w", err)
 	}
@@ -57,7 +57,9 @@ func (i *Index) Insert(ctx context.Context, req InsertRequest) (*InsertResult, e
 
 	packed := make([]*es2pb.PackedVectors, 0, len(ciphers))
 	cur := 0
+	mdCursor := 0
 	for idx, blob := range ciphers {
+		count := innerCounts[idx]
 		if cur > 0 && cur+len(blob) > insertChunkSize {
 			if err := sendInsertFrame(stream, i.name, packed); err != nil {
 				return nil, err
@@ -65,6 +67,11 @@ func (i *Index) Insert(ctx context.Context, req InsertRequest) (*InsertResult, e
 			packed = packed[:0]
 			cur = 0
 		}
+		// NumVector carries libevi's inner item count (how many logical
+		// vectors are packed into this ciphertext) so the server can allocate
+		// item IDs per logical vector. Metadata is sliced to the same count,
+		// padded with "" when the caller's flat metadata array runs out —
+		// matches pyenvector _prepare_metadata_for_chunk semantics.
 		pv := &es2pb.PackedVectors{
 			Vector: &es2pb.DataType{
 				CipherVector: &es2pb.PackedCiphertexts{
@@ -72,11 +79,16 @@ func (i *Index) Insert(ctx context.Context, req InsertRequest) (*InsertResult, e
 					Data: blob,
 				},
 			},
-			NumVector: 1,
+			NumVector: uint64(count),
 		}
-		if idx < len(req.Metadata) {
-			pv.Metadata = []string{req.Metadata[idx]}
+		md := make([]string, count)
+		for j := 0; j < count; j++ {
+			if mdCursor < len(req.Metadata) {
+				md[j] = req.Metadata[mdCursor]
+				mdCursor++
+			}
 		}
+		pv.Metadata = md
 		packed = append(packed, pv)
 		cur += len(blob)
 	}

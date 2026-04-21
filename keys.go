@@ -70,13 +70,16 @@ func (k *Keys) Close() error {
 	return nil
 }
 
-// Encrypt runs the local FHE encrypt stage and returns one serialized
-// Query byte slice per input vector, ready for Index.Insert. Returns
-// ErrKeysNotForEncrypt when the bundle was opened without KeyPartEnc or
-// has been Closed.
-func (k *Keys) Encrypt(vectors [][]float32) ([][]byte, error) {
+// Encrypt runs the local FHE encrypt stage. libevi packs input vectors via
+// CKKS slot packing, so len(ciphers) can be smaller than len(vectors);
+// innerCounts[i] reports how many logical input vectors are packed into
+// ciphers[i] and sum(innerCounts) == len(vectors). Index.Insert uses that
+// mapping to align server-side item allocation and metadata with logical
+// vectors rather than ciphertexts. Returns ErrKeysNotForEncrypt when the
+// bundle was opened without KeyPartEnc or has been Closed.
+func (k *Keys) Encrypt(vectors [][]float32) (ciphers [][]byte, innerCounts []int, err error) {
 	if k == nil || k.enc == nil {
-		return nil, ErrKeysNotForEncrypt
+		return nil, nil, ErrKeysNotForEncrypt
 	}
 	return k.enc.EncryptMultiple(vectors, "item")
 }
