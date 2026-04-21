@@ -41,6 +41,11 @@ Expected layout
 ---------------
   third_party/evi/
     include/                                   # C/C++ headers (EVI/, evi_c/, km/, utils/, c_api.h)
+    include/nlohmann/json.hpp                  # Vendored single-header JSON (v3.11.3, MIT). Required
+                                               # by km/ProviderMeta.hpp + km/KeyEnvelope.hpp when the
+                                               # local cgo shim (internal/crypto/keymanager_shim.cpp)
+                                               # includes km/KeyManager.hpp. Source:
+                                               # https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
     linux_amd64/lib/libevi_c_api.a
     linux_amd64/lib/libevi_crypto.a
     linux_amd64/lib/libdeb.a

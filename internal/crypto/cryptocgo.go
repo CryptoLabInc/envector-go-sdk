@@ -16,6 +16,13 @@
 // Every other C API symbol is intentionally untouched. Keys are loaded
 // from disk (not from in-memory bytes) because the C API lacks stream
 // variants for KeyPack / SecretKey.
+//
+// In addition to the upstream C API, this package ships a local C-ABI
+// shim (keymanager_shim.{h,cpp}) that wraps evi::KeyManager directly from
+// libevi_crypto.a — the upstream libevi_c_api.a omits KeyManager, so
+// Wrap/UnwrapSecKey/EncKey/EvalKey would not reach cgo without this layer.
+// The shim is path-based, NONE-seal only, and used by keys.go to produce
+// and consume pyenvector 1.2.2-compatible JSON key envelopes.
 package crypto
 
 /*
@@ -29,6 +36,7 @@ package crypto
 // exists. Linux assumes system libssl-dev. Windows assumes MSYS2
 // mingw-w64-x86_64-openssl.
 #cgo CPPFLAGS: -I${SRCDIR}/../../third_party/evi/include
+#cgo CXXFLAGS: -std=c++17
 #cgo darwin,arm64  LDFLAGS: -L${SRCDIR}/../../third_party/evi/darwin_arm64/lib  -levi_c_api -levi_crypto -ldeb -lalea -L/opt/homebrew/opt/openssl@3/lib -L/usr/local/opt/openssl@3/lib -lssl -lcrypto -lc++ -lm
 #cgo darwin,amd64  LDFLAGS: -L${SRCDIR}/../../third_party/evi/darwin_amd64/lib  -levi_c_api -levi_crypto -ldeb -lalea -L/usr/local/opt/openssl@3/lib -L/opt/homebrew/opt/openssl@3/lib -lssl -lcrypto -lc++ -lm
 #cgo linux,amd64   LDFLAGS: -L${SRCDIR}/../../third_party/evi/linux_amd64/lib   -levi_c_api -levi_crypto -ldeb -lalea -lssl -lcrypto -lstdc++ -lm
@@ -37,6 +45,7 @@ package crypto
 
 #include <stdlib.h>
 #include "c_api.h"
+#include "keymanager_shim.h"
 */
 import "C"
 
@@ -68,6 +77,98 @@ func wrapEviError(op string, st C.evi_status_t) error {
 		return fmt.Errorf("envector/crypto: %s: status=%d", op, int(st))
 	}
 	return fmt.Errorf("envector/crypto: %s: %s (status=%d)", op, msg, int(st))
+}
+
+// --- key manager shim ------------------------------------------------------
+//
+// The upstream libevi_c_api.a does not expose evi::KeyManager. Rather than
+// patch upstream + rebuild every platform archive, internal/crypto/
+// ships its own thin C-ABI shim (keymanager_shim.{h,cpp}) that includes
+// km/KeyManager.hpp and links against the already-bundled libevi_crypto.a.
+// Wrap/Unwrap below are the Go side of that shim, exposed so keys.go can
+// convert between the raw .bin files libevi writes and the
+// pyenvector 1.2.2 JSON envelopes (SecKey.json / EncKey.json / EvalKey.json)
+// for cross-SDK compat. NONE-seal only — AES_KEK sealing is not wired.
+
+func kmShimError(op string, rc C.int) error {
+	msg := C.GoString(C.evi_km_last_error())
+	switch rc {
+	case 0:
+		return nil
+	case -1:
+		if msg == "" {
+			return fmt.Errorf("envector/crypto: %s: invalid argument", op)
+		}
+		return fmt.Errorf("envector/crypto: %s: %s", op, msg)
+	default:
+		if msg == "" {
+			return fmt.Errorf("envector/crypto: %s: KeyManager exception (rc=%d)", op, int(rc))
+		}
+		return fmt.Errorf("envector/crypto: %s: %s", op, msg)
+	}
+}
+
+// WrapSecKey envelopes the raw libevi SecKey.bin at binPath into the
+// pyenvector-style JSON envelope at jsonPath, tagging it with keyID.
+func WrapSecKey(keyID, binPath, jsonPath string) error {
+	cID := C.CString(keyID)
+	cIn := C.CString(binPath)
+	cOut := C.CString(jsonPath)
+	defer C.free(unsafe.Pointer(cID))
+	defer C.free(unsafe.Pointer(cIn))
+	defer C.free(unsafe.Pointer(cOut))
+	return kmShimError("evi_km_wrap_sec_key", C.evi_km_wrap_sec_key(cID, cIn, cOut))
+}
+
+// WrapEncKey is the EncKey counterpart of WrapSecKey.
+func WrapEncKey(keyID, binPath, jsonPath string) error {
+	cID := C.CString(keyID)
+	cIn := C.CString(binPath)
+	cOut := C.CString(jsonPath)
+	defer C.free(unsafe.Pointer(cID))
+	defer C.free(unsafe.Pointer(cIn))
+	defer C.free(unsafe.Pointer(cOut))
+	return kmShimError("evi_km_wrap_enc_key", C.evi_km_wrap_enc_key(cID, cIn, cOut))
+}
+
+// WrapEvalKey is the EvalKey counterpart of WrapSecKey.
+func WrapEvalKey(keyID, binPath, jsonPath string) error {
+	cID := C.CString(keyID)
+	cIn := C.CString(binPath)
+	cOut := C.CString(jsonPath)
+	defer C.free(unsafe.Pointer(cID))
+	defer C.free(unsafe.Pointer(cIn))
+	defer C.free(unsafe.Pointer(cOut))
+	return kmShimError("evi_km_wrap_eval_key", C.evi_km_wrap_eval_key(cID, cIn, cOut))
+}
+
+// UnwrapSecKey extracts the raw SecKey.bin payload from a pyenvector-style
+// JSON envelope. NONE seal only; sealed bundles are rejected by the
+// underlying KeyManager.
+func UnwrapSecKey(jsonPath, binPath string) error {
+	cIn := C.CString(jsonPath)
+	cOut := C.CString(binPath)
+	defer C.free(unsafe.Pointer(cIn))
+	defer C.free(unsafe.Pointer(cOut))
+	return kmShimError("evi_km_unwrap_sec_key", C.evi_km_unwrap_sec_key(cIn, cOut))
+}
+
+// UnwrapEncKey is the EncKey counterpart of UnwrapSecKey.
+func UnwrapEncKey(jsonPath, binPath string) error {
+	cIn := C.CString(jsonPath)
+	cOut := C.CString(binPath)
+	defer C.free(unsafe.Pointer(cIn))
+	defer C.free(unsafe.Pointer(cOut))
+	return kmShimError("evi_km_unwrap_enc_key", C.evi_km_unwrap_enc_key(cIn, cOut))
+}
+
+// UnwrapEvalKey is the EvalKey counterpart of UnwrapSecKey.
+func UnwrapEvalKey(jsonPath, binPath string) error {
+	cIn := C.CString(jsonPath)
+	cOut := C.CString(binPath)
+	defer C.free(unsafe.Pointer(cIn))
+	defer C.free(unsafe.Pointer(cOut))
+	return kmShimError("evi_km_unwrap_eval_key", C.evi_km_unwrap_eval_key(cIn, cOut))
 }
 
 // --- context ---------------------------------------------------------------

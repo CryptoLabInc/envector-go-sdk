@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/CryptoLabInc/envector-go-sdk/internal/crypto"
 )
 
 func baseKeyOpts(dir string) []KeysOption {
@@ -36,9 +38,16 @@ func TestGenerateKeys_CreatesAllThreeFiles(t *testing.T) {
 	if !KeysExist(baseKeyOpts(dir)...) {
 		t.Error("KeysExist still false after generate")
 	}
-	for _, name := range []string{encKeyFile, evalKeyFile, secKeyFile} {
+	// pyenvector 1.2.2 parity: only the .json envelopes are kept; the raw
+	// .bin temporaries libevi emits are wrapped-then-deleted.
+	for _, name := range []string{encKeyJSONFile, evalKeyJSONFile, secKeyJSONFile} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("%s missing: %v", name, err)
+		}
+	}
+	for _, name := range []string{encKeyBinFile, evalKeyBinFile, secKeyBinFile} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s must be cleaned up after wrap, got err=%v", name, err)
 		}
 	}
 }
@@ -229,6 +238,52 @@ func TestOpenKeysFromFile_PartsSec_VaultSide(t *testing.T) {
 
 	if _, err := keys.Encrypt([][]float32{{1, 2}}); !errors.Is(err, ErrKeysNotForEncrypt) {
 		t.Errorf("Encrypt without KeyPartEnc: got %v, want ErrKeysNotForEncrypt", err)
+	}
+}
+
+// TestOpenKeysFromFile_LegacyBinBundle exercises the reverse-compat path:
+// a directory holding only the raw .bin trio (e.g. bundles produced by an
+// older Go SDK release that predated the JSON envelope, or manually-unwrapped
+// pyenvector keys) must still open.
+func TestOpenKeysFromFile_LegacyBinBundle(t *testing.T) {
+	srcDir := filepath.Join(t.TempDir(), "json-src")
+	if err := GenerateKeys(baseKeyOpts(srcDir)...); err != nil {
+		t.Fatalf("GenerateKeys: %v", err)
+	}
+
+	binDir := filepath.Join(t.TempDir(), "bin-only")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	unwraps := []struct {
+		in, out string
+		fn      func(string, string) error
+	}{
+		{filepath.Join(srcDir, encKeyJSONFile), filepath.Join(binDir, encKeyBinFile), crypto.UnwrapEncKey},
+		{filepath.Join(srcDir, evalKeyJSONFile), filepath.Join(binDir, evalKeyBinFile), crypto.UnwrapEvalKey},
+		{filepath.Join(srcDir, secKeyJSONFile), filepath.Join(binDir, secKeyBinFile), crypto.UnwrapSecKey},
+	}
+	for _, u := range unwraps {
+		if err := u.fn(u.in, u.out); err != nil {
+			t.Fatalf("unwrap %s: %v", u.in, err)
+		}
+	}
+
+	if !KeysExist(baseKeyOpts(binDir)...) {
+		t.Fatal("KeysExist must accept a .bin-only bundle")
+	}
+	keys, err := OpenKeysFromFile(baseKeyOpts(binDir)...)
+	if err != nil {
+		t.Fatalf("OpenKeysFromFile (.bin): %v", err)
+	}
+	defer keys.Close()
+
+	vec := make([]float32, 128)
+	for i := range vec {
+		vec[i] = float32(i) / 128
+	}
+	if _, err := keys.Encrypt([][]float32{vec}); err != nil {
+		t.Fatalf("Encrypt: %v", err)
 	}
 }
 

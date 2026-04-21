@@ -2,16 +2,24 @@ package envector
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/CryptoLabInc/envector-go-sdk/internal/crypto"
 )
 
+// Key bundle filenames. GenerateKeys writes the pyenvector 1.2.2-style
+// JSON envelopes; the raw .bin forms are still recognised on open so
+// legacy bundles (or bundles produced by the older Go SDK releases that
+// skipped the JSON wrap) continue to load.
 const (
-	encKeyFile  = "EncKey.bin"
-	evalKeyFile = "EvalKey.bin"
-	secKeyFile  = "SecKey.bin"
+	encKeyBinFile   = "EncKey.bin"
+	evalKeyBinFile  = "EvalKey.bin"
+	secKeyBinFile   = "SecKey.bin"
+	encKeyJSONFile  = "EncKey.json"
+	evalKeyJSONFile = "EvalKey.json"
+	secKeyJSONFile  = "SecKey.json"
 )
 
 // Keys is the local side of a 3-file FHE key bundle (EncKey / EvalKey /
@@ -84,24 +92,46 @@ func (k *Keys) Decrypt(blob []byte) (scores [][]float64, shardIdx []int32, err e
 	return k.dec.DecryptScore(blob)
 }
 
-// KeysExist reports whether the 3-file bundle (EncKey.bin, EvalKey.bin,
-// SecKey.bin) is present under WithKeyPath.
+// resolveKeySlot returns the preferred source path for one of the three
+// key slots, preferring the pyenvector-style .json envelope when both
+// formats coexist in the directory.
+func resolveKeySlot(dir, binName, jsonName string) (path string, isJSON bool, exists bool) {
+	jsonPath := filepath.Join(dir, jsonName)
+	if _, err := os.Stat(jsonPath); err == nil {
+		return jsonPath, true, true
+	}
+	binPath := filepath.Join(dir, binName)
+	if _, err := os.Stat(binPath); err == nil {
+		return binPath, false, true
+	}
+	return "", false, false
+}
+
+// KeysExist reports whether the bundle (Enc/Eval/Sec) is present under
+// WithKeyPath. Either the .json envelope (pyenvector 1.2.2 format) or the
+// legacy .bin form satisfies each slot.
 func KeysExist(opts ...KeysOption) bool {
 	o := buildKeysOptions(opts)
 	if o.Path == "" {
 		return false
 	}
-	for _, name := range []string{encKeyFile, evalKeyFile, secKeyFile} {
-		if _, err := os.Stat(filepath.Join(o.Path, name)); err != nil {
+	slots := [3][2]string{
+		{encKeyBinFile, encKeyJSONFile},
+		{evalKeyBinFile, evalKeyJSONFile},
+		{secKeyBinFile, secKeyJSONFile},
+	}
+	for _, s := range slots {
+		if _, _, ok := resolveKeySlot(o.Path, s[0], s[1]); !ok {
 			return false
 		}
 	}
 	return true
 }
 
-// GenerateKeys writes a fresh 3-file bundle at WithKeyPath via the active
-// crypto provider. Returns ErrKeysAlreadyExist when any of the three
-// files is already present; GenerateKeys never overwrites existing keys.
+// GenerateKeys writes a fresh pyenvector-compatible bundle at WithKeyPath
+// (three JSON envelopes: EncKey.json, EvalKey.json, SecKey.json). Returns
+// ErrKeysAlreadyExist when any of the three slots — in either format —
+// is already present; GenerateKeys never overwrites existing keys.
 func GenerateKeys(opts ...KeysOption) error {
 	o := buildKeysOptions(opts)
 	if err := o.validate(); err != nil {
@@ -122,12 +152,40 @@ func GenerateKeys(opts ...KeysOption) error {
 	if err != nil {
 		return fmt.Errorf("envector: new key generator: %w", err)
 	}
-	return gen.Generate()
+	if err := gen.Generate(); err != nil {
+		return err
+	}
+	// libevi's MultiKeyGenerator emits the raw .bin trio; wrap each into
+	// pyenvector's JSON envelope then drop the .bin so the on-disk shape
+	// matches what `python -m pyenvector.cli.pyenvector_keygen` produces.
+	steps := []struct {
+		binFile  string
+		jsonFile string
+		wrap     func(keyID, binPath, jsonPath string) error
+	}{
+		{encKeyBinFile, encKeyJSONFile, crypto.WrapEncKey},
+		{evalKeyBinFile, evalKeyJSONFile, crypto.WrapEvalKey},
+		{secKeyBinFile, secKeyJSONFile, crypto.WrapSecKey},
+	}
+	for _, s := range steps {
+		binPath := filepath.Join(o.Path, s.binFile)
+		jsonPath := filepath.Join(o.Path, s.jsonFile)
+		if err := s.wrap(o.KeyID, binPath, jsonPath); err != nil {
+			return fmt.Errorf("envector: wrap %s: %w", s.binFile, err)
+		}
+		if err := os.Remove(binPath); err != nil {
+			return fmt.Errorf("envector: remove %s: %w", s.binFile, err)
+		}
+	}
+	return nil
 }
 
-// OpenKeysFromFile loads the 3-file bundle at WithKeyPath and builds the
-// Encryptor + Decryptor pair backing a Keys handle. Returns ErrKeysNotFound
-// when the bundle is absent. WithKeyParts narrows the set of key materials
+// OpenKeysFromFile loads the bundle at WithKeyPath and builds the
+// Encryptor + Decryptor pair backing a Keys handle. Accepts both the
+// pyenvector-style JSON envelopes (default output of GenerateKeys) and
+// legacy .bin files — per-slot format is detected automatically, so
+// mix-and-match is fine. Returns ErrKeysNotFound when a required slot is
+// absent in either format. WithKeyParts narrows the set of key materials
 // that get materialised; omitting it loads all three.
 func OpenKeysFromFile(opts ...KeysOption) (*Keys, error) {
 	o := buildKeysOptions(opts)
@@ -140,6 +198,62 @@ func OpenKeysFromFile(opts ...KeysOption) (*Keys, error) {
 
 	wantEnc, wantEval, wantSec := resolveKeyParts(o.Parts)
 
+	// Stage the requested slots into a tempdir using canonical .bin names
+	// so the path-based cgo loaders (evi_keypack_load_enc_key /
+	// evi_secret_key_create_from_path) can find them regardless of whether
+	// the source was .json or .bin. The tempdir is torn down once every
+	// cgo handle has finished loading — libevi reads the files eagerly.
+	stage, err := os.MkdirTemp("", "envector-keys-*")
+	if err != nil {
+		return nil, fmt.Errorf("envector: stage tempdir: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(stage) }
+
+	materialise := func(binName, jsonName string, unwrap func(jsonPath, binPath string) error) (string, error) {
+		srcPath, isJSON, ok := resolveKeySlot(o.Path, binName, jsonName)
+		if !ok {
+			return "", ErrKeysNotFound
+		}
+		dstPath := filepath.Join(stage, binName)
+		if isJSON {
+			if err := unwrap(srcPath, dstPath); err != nil {
+				return "", fmt.Errorf("envector: unwrap %s: %w", jsonName, err)
+			}
+			return dstPath, nil
+		}
+		if err := copyFile(srcPath, dstPath); err != nil {
+			return "", fmt.Errorf("envector: stage %s: %w", binName, err)
+		}
+		return dstPath, nil
+	}
+
+	if wantEnc {
+		if _, err := materialise(encKeyBinFile, encKeyJSONFile, crypto.UnwrapEncKey); err != nil {
+			cleanup()
+			return nil, err
+		}
+	}
+	var evalBytes []byte
+	if wantEval {
+		path, err := materialise(evalKeyBinFile, evalKeyJSONFile, crypto.UnwrapEvalKey)
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			cleanup()
+			return nil, fmt.Errorf("envector: read %s: %w", evalKeyBinFile, err)
+		}
+		evalBytes = b
+	}
+	if wantSec {
+		if _, err := materialise(secKeyBinFile, secKeyJSONFile, crypto.UnwrapSecKey); err != nil {
+			cleanup()
+			return nil, err
+		}
+	}
+
 	p := crypto.Default()
 	ckks, err := p.NewCKKSContext(crypto.CKKSParams{
 		Preset:   o.Preset.String(),
@@ -147,6 +261,7 @@ func OpenKeysFromFile(opts ...KeysOption) (*Keys, error) {
 		EvalMode: o.EvalMode.String(),
 	})
 	if err != nil {
+		cleanup()
 		return nil, fmt.Errorf("envector: new ckks context: %w", err)
 	}
 
@@ -159,41 +274,47 @@ func OpenKeysFromFile(opts ...KeysOption) (*Keys, error) {
 	}
 
 	if wantEnc {
-		// Encryptor loads EncKey directly from o.Path via the provider
-		// (upstream C API only accepts path-based loaders).
-		enc, err := p.NewEncryptor(ckks, o.Path)
+		enc, err := p.NewEncryptor(ckks, stage)
 		if err != nil {
 			_ = ckks.Close()
+			cleanup()
 			return nil, fmt.Errorf("envector: new encryptor: %w", err)
 		}
 		keys.enc = enc
 	}
-
 	if wantEval {
-		// EvalKey bytes are carried in-memory for Client.RegisterKeys
-		// uploads only — the cgo Encryptor never touches them.
-		evalBytes, err := os.ReadFile(filepath.Join(o.Path, evalKeyFile))
-		if err != nil {
-			if keys.enc != nil {
-				_ = keys.enc.Close()
-			}
-			_ = ckks.Close()
-			return nil, fmt.Errorf("envector: read %s: %w", evalKeyFile, err)
-		}
 		keys.evalKeyBytes = evalBytes
 	}
-
 	if wantSec {
-		dec, err := p.NewDecryptor(ckks, o.Path)
+		dec, err := p.NewDecryptor(ckks, stage)
 		if err != nil {
 			if keys.enc != nil {
 				_ = keys.enc.Close()
 			}
 			_ = ckks.Close()
+			cleanup()
 			return nil, fmt.Errorf("envector: new decryptor: %w", err)
 		}
 		keys.dec = dec
 	}
 
+	cleanup()
 	return keys, nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
