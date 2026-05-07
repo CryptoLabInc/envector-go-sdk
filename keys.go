@@ -118,13 +118,19 @@ func KeysExist(opts ...KeysOption) bool {
 	if o.Path == "" {
 		return false
 	}
-	slots := [3][2]string{
-		{encKeyBinFile, encKeyJSONFile},
-		{evalKeyBinFile, evalKeyJSONFile},
-		{secKeyBinFile, secKeyJSONFile},
+	wantEnc, wantEval, wantSec := resolveKeyParts(o.Parts)
+	if wantEnc {
+		if _, _, ok := resolveKeySlot(o.Path, encKeyBinFile, encKeyJSONFile); !ok {
+			return false
+		}
 	}
-	for _, s := range slots {
-		if _, _, ok := resolveKeySlot(o.Path, s[0], s[1]); !ok {
+	if wantEval {
+		if _, _, ok := resolveKeySlot(o.Path, evalKeyBinFile, evalKeyJSONFile); !ok {
+			return false
+		}
+	}
+	if wantSec {
+		if _, _, ok := resolveKeySlot(o.Path, secKeyBinFile, secKeyJSONFile); !ok {
 			return false
 		}
 	}

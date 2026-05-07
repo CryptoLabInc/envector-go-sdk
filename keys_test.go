@@ -320,3 +320,44 @@ func TestRegisterKeys_WithoutEvalPart_ReturnsErr(t *testing.T) {
 		t.Errorf("ActivateKeys without KeyPartEval: got %v, want ErrKeysNotForRegister", err)
 	}
 }
+
+// TestKeysExist_PartsAware exercises the KeyParts-aware lookup. Vault's
+// agent-manifest delivery only ships EncKey to the client (Eval/Sec stay
+// in Vault), so the consumer opens that directory with
+// WithKeyParts(KeyPartEnc) and expects KeysExist to return true on an
+// Enc-only directory. The previous implementation walked all three slots
+// unconditionally and rejected the bundle.
+func TestKeysExist_PartsAware(t *testing.T) {
+	encOnly := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, encKeyJSONFile), []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+
+	t.Run("enc-only dir + WithKeyParts(KeyPartEnc) → true", func(t *testing.T) {
+		dir := encOnly(t)
+		opts := append(baseKeyOpts(dir), WithKeyParts(KeyPartEnc))
+		if !KeysExist(opts...) {
+			t.Error("KeysExist with KeyPartEnc must accept Enc-only directory")
+		}
+	})
+
+	t.Run("enc-only dir + default parts (= all three) → false", func(t *testing.T) {
+		dir := encOnly(t)
+		// No WithKeyParts → resolveKeyParts treats it as all three required.
+		if KeysExist(baseKeyOpts(dir)...) {
+			t.Error("default parts must require all 3 slots")
+		}
+	})
+
+	t.Run("enc-only dir + WithKeyParts(KeyPartEval) → false (eval missing)", func(t *testing.T) {
+		dir := encOnly(t)
+		opts := append(baseKeyOpts(dir), WithKeyParts(KeyPartEval))
+		if KeysExist(opts...) {
+			t.Error("requesting Eval on an Enc-only dir must fail")
+		}
+	})
+}
